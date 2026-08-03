@@ -14,3 +14,6 @@ function loadSource(options: ReadOptions): string {
     return `fetching url: ${options.url}`;
   }
 }
+
+console.log(loadSource(fromFile));
+console.log(loadSource(fromUrl));
