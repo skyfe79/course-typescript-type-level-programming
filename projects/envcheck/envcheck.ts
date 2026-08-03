@@ -33,8 +33,20 @@ const envSpec = {
     values: ["debug", "info", "warn", "error"],
     default: "info",
   },
-};
-// envSpec.PORT.kind는 "integer"가 아니라 넓은 string으로 추론된다.
-const widenedKind: string = envSpec.PORT.kind;
-// envSpec.LOG_LEVEL.values도 정확한 네 문자열 튜플이 아니라 string[]로 추론된다.
-const widenedValues: string[] = envSpec.LOG_LEVEL.values;
+} as const;
+const exactKind: "integer" = envSpec.PORT.kind;
+const exactValues: readonly ["debug", "info", "warn", "error"] =
+  envSpec.LOG_LEVEL.values;
+
+// kind에 FieldSpec에 없는 값 "enumm"을 일부러 넣었는데, as const는 얼리기만 할 뿐 이 오타를 잡지 못한다.
+const envSpecTypo = {
+  HOST: { kind: "string" },
+  PORT: { kind: "integer" },
+  DEBUG: { kind: "boolean", default: false },
+  LOG_LEVEL: {
+    kind: "enumm",
+    values: ["debug", "info", "warn", "error"],
+    default: "info",
+  },
+} as const;
+// 컴파일은 그대로 통과한다 — kind가 FieldSpec의 네 값 중 하나여야 한다는 것을 아무도 확인하지 않았다.
