@@ -68,4 +68,10 @@ readyStore.set("go");
 // readyStore.set(42);
 // error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
 
+// (a) 명시적 타입 인자 — 호출자가 직접 결정해야 하고, 안전한 대체 모양이 아예 없을 때.
+// (b) extends 제약 — 안전한 대체 모양은 있지만 구체적인 값 하나로 확정하고 싶지는 않을 때.
+// (c) 호출 재구성 — 실제 값이 호출부에 자연스럽게 있다면 항상 먼저 고려한다. 별도 표기가 필요 없는 기본 선택이다.
+//
+// 셋 중 어느 것도 막지 못하는 것: 원래 추론에 관여하면 안 되는 자리가 실수로 T를 넓히는 문제.
+
 export {};
