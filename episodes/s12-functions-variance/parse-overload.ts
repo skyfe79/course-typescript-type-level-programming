@@ -31,4 +31,24 @@ const rawConfig: Record<string, string> = {
   region: "ap-northeast-2",
 };
 
+// codeStep 178 — 호출부에서 반환 타입 확인
+
+const count = parse("count");
+console.log("count는 number라서 바로 더한다:", count + 1);
+
+const deployedAt = parse("deployedAt");
+console.log("deployedAt은 Date라서 바로 메서드를 부른다:", deployedAt.getFullYear());
+
+const region = parse("region");
+console.log("목록에 없는 키는 넓은 오버로드로 떨어진다:", JSON.stringify(region));
+
+// 반환 타입이 유니온이 아니라 하나로 좁혀졌다는 증거 — 아래 두 줄은 컴파일되지 않는다.
+// const year = region.getFullYear();
+// error TS2339: Property 'getFullYear' does not exist on type '{ raw: string; }'.
+
+// const raw = parse("count").raw;
+// error TS2339: Property 'raw' does not exist on type 'number'.
+
+console.log("요약 — 오버로드 목록이 키마다 반환 타입을 정하므로 호출부가 유니온을 직접 좁힐 필요가 없다.");
+
 export {};
