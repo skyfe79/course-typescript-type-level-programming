@@ -48,3 +48,23 @@ const exactKind: "integer" = envSpec.PORT.kind;
 //   },
 // } as const satisfies EnvSpec;
 // error TS2820: Type '"enumm"' is not assignable to type '"boolean" | "enum" | "integer" | "string"'. Did you mean '"enum"'?
+
+function isNonEmptyString(raw: string): raw is string {
+  return raw.length > 0;
+}
+
+function isIntegerString(raw: string): raw is string {
+  return /^-?\d+$/.test(raw);
+}
+
+const hostCandidate: string = "localhost";
+console.log(`host ok: ${isNonEmptyString(hostCandidate)}`);
+
+const portCandidate: string = "8080";
+if (isIntegerString(portCandidate)) {
+  const portNumber: number = Number(portCandidate);
+  console.log(`port ok: ${portNumber}`);
+}
+
+const notPort: string = "eighty";
+console.log(`is integer string: ${isIntegerString(notPort)}`);
