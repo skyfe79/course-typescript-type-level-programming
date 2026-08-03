@@ -12,4 +12,13 @@ function readRawConfig(): RawConfig {
   };
 }
 
+function loadConfig() {
+  const raw = readRawConfig();
+  const host = raw.host ?? "localhost";
+  const port = raw.port ?? "8080";
+  const timeoutMs = raw.timeoutMs ?? "5000";
+  // 여기서 host를 호버하면 string이다 — undefined가 제거됐다.
+  return { host, port, timeoutMs };
+}
+
 export {};
