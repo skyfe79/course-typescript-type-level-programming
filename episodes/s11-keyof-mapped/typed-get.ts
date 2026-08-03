@@ -27,4 +27,8 @@ console.log(okName, okEmail);
 const checkName: string = get(user, "name");
 const checkId: number = get(user, "id");
 
+// user에 없는 키는 key 매개변수 자리에 들어갈 수 없다. 그래서 아래 줄은 막아 두었다.
+// const typoRejected = get(user, "nam");
+// error TS2345: Argument of type '"nam"' is not assignable to parameter of type '"email" | "id" | "name"'.
+
 export {};
