@@ -19,3 +19,24 @@ printLength(undefined);
 // 인자를 생략하면 다음 호출은 막힌다.
 // printLength();
 // error TS2554: Expected 1 arguments, but got 0.
+
+interface User {
+  name?: string;
+}
+
+// function printNameLength(user: User): void {
+//   console.log("length:", user.name.length);
+// }
+// error TS18048: 'user.name' is possibly 'undefined'.
+
+function printNameLength(user: User): void {
+  if (user.name === undefined) {
+    console.log("length:", "no value passed");
+  } else {
+    console.log("length:", user.name.length);
+  }
+}
+
+printNameLength({ name: "Ada" });
+// 옵셔널 프로퍼티는 키를 생략할 수 있으므로 빈 객체 호출도 통과한다.
+printNameLength({});
