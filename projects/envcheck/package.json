@@ -1,0 +1,7 @@
+{
+  "name": "envcheck",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "환경 변수 확인 CLI (§9 프로젝트)입니다."
+}
