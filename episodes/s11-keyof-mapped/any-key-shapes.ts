@@ -38,4 +38,27 @@ console.log("키 결과 — 레코드:", "string");
 console.log("키 결과 — 매핑된 타입:", '"cpu" | "memory"');
 console.log("키 결과 — 타입 단언:", keyChecksPassed ? "통과" : "실패");
 
+// codeStep 172 — 오타 하나로 세 타입을 대조
+
+// 아무 문자열 키를 받기 때문에 오타도 정상 키처럼 통과한다. 이 통과가 결함이다.
+const usageByIndex: ByIndexSignature = { cpu: 10, mem0ry: 5 };
+
+// Record<string, number>도 모양은 같아서 같은 오타를 막지 못한다.
+const usageByRecord: ByRecord = { cpu: 10, mem0ry: 5 };
+
+console.log("오타 대입 — 인덱스 시그니처:", usageByIndex);
+console.log("오타 대입 — 레코드:", usageByRecord);
+
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// const usageByMapped: ByMappedType = { cpu: 10, mem0ry: 5 };
+// error TS2561: Object literal may only specify known properties, but 'mem0ry' does not exist in type 'ByMappedType'. Did you mean to write 'memory'?
+
+const usageByMappedCorrect: ByMappedType = { cpu: 10, memory: 5 };
+
+console.log("올바른 대입 — 매핑된 타입:", usageByMappedCorrect);
+console.log(
+  "요약 — 오타를 잡은 방식:",
+  "위 주석을 풀면 매핑된 타입에서만 오류가 난다.",
+);
+
 export {};
