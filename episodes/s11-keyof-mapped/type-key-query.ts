@@ -30,4 +30,32 @@ const keys = listConfigKeys(defaultConfig);
 
 console.log(checkNarrow, keys);
 
+// 타입 자리의 typeof는 실행되지 않는다. 이미 선언된 값의 타입을 그대로 읽어 올 뿐이다.
+// 그래서 이 별칭을 만들면서 프로퍼티 타입을 한 글자도 손으로 적지 않았다.
+type DefaultConfig = typeof defaultConfig;
+
+// 끌어온 것은 number나 string이 아니라 값에 적힌 리터럴 그대로다.
+const checkConfig: DefaultConfig = {
+  retries: 3,
+  timeoutMs: 1000,
+  baseUrl: "https://api.example.com",
+};
+
+// 값 하나만 달라져도 대입은 막힌다. 그래서 아래 줄은 막아 두었다.
+// const wrongValue: DefaultConfig = { ...checkConfig, retries: 4 };
+// error TS2322: Type '4' is not assignable to type '3'.
+
+// as const로 얼린 값에서 끌어온 타입이라 프로퍼티도 readonly다. 그래서 아래 줄도 막아 두었다.
+// checkConfig.retries = 4;
+// error TS2540: Cannot assign to 'retries' because it is a read-only property.
+
+// 매개변수 타입 자리에도 같은 typeof를 쓴다. 값과 타입이 따로 놀 자리가 없다.
+function describeConfig(cfg: typeof defaultConfig) {
+  for (const key of listConfigKeys(cfg)) {
+    console.log(`${String(key)}: ${cfg[key]}`);
+  }
+}
+
+describeConfig(defaultConfig);
+
 export {};
