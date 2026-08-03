@@ -1,20 +1,19 @@
-function tag<T>(theme: T): T {
+// const 타입 매개변수는 이 자리의 기본 추론을 가장 좁은 타입으로 바꾼다.
+// 호출자가 기억해야 할 새 문법이 아니라, 선언 한 곳에서 정해지는 기본 동작이다.
+function tag<const T>(theme: T): T {
   return theme;
 }
 
-// 리터럴을 그대로 적은 객체를 넘겼는데, T는 그 안의 "red"를 string으로 넓혀서 받는다.
-// 이건 tag의 잘못이 아니라 컴파일러의 정상적인 기본 동작이다.
-const widened = tag({ color: "red" });
+// 앞 단계와 글자 하나 다르지 않은 호출이다. 선언 쪽에 const를 붙인 것만으로 결과가 달라진다.
+const kept = tag({ color: "red" });
 
-// 넓어졌다는 증거다. color가 "red"여야 하는 자리에는 들어가지 못한다.
-// const widenedLiteral: { readonly color: "red" } = widened;
+// 앞 단계에서는 똑같이 생긴 이 줄이 거절당했다. 그때 오류는 이랬다.
 // error TS2322: Type '{ color: string; }' is not assignable to type '{ readonly color: "red"; }'.
+const keptLiteral: { readonly color: "red" } = kept;
 
-// 지금 리터럴을 지키는 방법은 호출하는 쪽에서 직접 as const를 적는 것 하나뿐이다.
-// 리터럴을 지키려는 호출자가 매번 이걸 기억해야 하고, 잊어도 컴파일러는 알려 주지 않는다.
-const withAsConst = tag({ color: "red" } as const);
-const keptByCaller: { readonly color: "red" } = withAsConst;
+// 앞 단계에서 호출자가 손으로 적어야 했던 as const는 이제 없어도 된다. 적어도 결과는 같다.
+const stillLiteral: { readonly color: "red" } = tag({ color: "red" } as const);
 
-console.log(widened.color, keptByCaller.color);
+console.log(keptLiteral.color, stillLiteral.color);
 
 export {};
