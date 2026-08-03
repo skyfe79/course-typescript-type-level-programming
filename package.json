@@ -1,0 +1,30 @@
+{
+  "name": "course-typescript-type-level-programming",
+  "version": "1.0.0",
+  "description": "타입 설계(Part 1)와 타입 레벨 프로그래밍(Part 2) 강좌의 실습 코드가 들어 있습니다.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skyfe79/course-typescript-type-level-programming.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/skyfe79/course-typescript-type-level-programming/issues"
+  },
+  "homepage": "https://github.com/skyfe79/course-typescript-type-level-programming#readme",
+  "volta": {
+    "node": "25.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
