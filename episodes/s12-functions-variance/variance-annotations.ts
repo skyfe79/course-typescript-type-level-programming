@@ -60,4 +60,39 @@ const methodCatBox: MethodBox<Cat> = {
 
 methodCatBox.set(cat);
 
+// codeStep 184 — 어노테이션을 실제 용법에 맞게 고치면 통과한다
+
+interface Box<T> {
+  get: () => T;
+  set: (v: T) => void;
+}
+
+let currentCat: Cat = cat;
+
+const catBox: Box<Cat> = {
+  get: () => currentCat,
+  set: (nextCat) => {
+    currentCat = nextCat;
+  },
+};
+
+catBox.set({
+  name: "콩이",
+  meow() {
+    return "냐옹";
+  },
+});
+
+console.log("Box<Cat>은 set 다음 get으로 같은 Cat을 돌려준다:", catBox.get().meow());
+
+// out을 떼면 읽기와 쓰기를 모두 반영해 Box<T>는 무공변으로 검사된다.
+// const animalBox: Box<Animal> = catBox;
+// episodes/s12-functions-variance/variance-annotations.ts(89,7): error TS2322: Type 'Box<Cat>' is not assignable to type 'Box<Animal>'.
+//   Types of property 'set' are incompatible.
+//     Type '(v: Cat) => void' is not assignable to type '(v: Animal) => void'.
+//       Types of parameters 'v' and 'v' are incompatible.
+//         Property 'meow' is missing in type 'Animal' but required in type 'Cat'.
+
+console.log("요약 — out은 반환 위치에만 맞고, 읽고 쓰는 박스는 어노테이션 없이 무공변으로 두는 편이 맞다.");
+
 export {};
