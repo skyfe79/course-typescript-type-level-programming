@@ -32,6 +32,16 @@ function registerRoute<const T extends readonly string[]>(...methods: T) {
 
 const viaWrapper = registerRoute("PUT", "PATCH");
 
-console.log(checkDirect, viaSpread, viaWrapper);
+// 나머지 두 결과도 같은 방식으로 확인한다. 세 대입이 모두 통과하면 세 가지 호출 방식
+// 전부에서 리터럴 튜플이 지켜진 것이다.
+const checkSpread: readonly ["GET", "POST"] = viaSpread;
+const checkWrapper: readonly ["PUT", "PATCH"] = viaWrapper;
+
+// 지켜진 것은 리터럴의 집합이 아니라 순서까지 있는 튜플이다. 순서를 바꾼 튜플에는 대입할 수
+// 없어 아래 줄은 막아 두었다.
+// const wrongOrder: readonly ["POST", "GET", "DELETE"] = direct;
+// error TS2322: Type 'readonly ["GET", "POST", "DELETE"]' is not assignable to type 'readonly ["POST", "GET", "DELETE"]'.
+
+console.log(checkDirect, checkSpread, checkWrapper);
 
 export {};
