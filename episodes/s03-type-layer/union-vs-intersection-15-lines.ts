@@ -10,3 +10,9 @@ interface WithName {
 // function showUnion(entity: WithId | WithName) {
 //   console.log(entity.id);
 // }
+
+function showIntersection(entity: WithId & WithName) {
+  console.log(entity.id, entity.name);
+}
+
+showIntersection({ id: "u1", name: "Ada" });
