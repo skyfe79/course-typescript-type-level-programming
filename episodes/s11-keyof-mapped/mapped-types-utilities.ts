@@ -20,4 +20,23 @@ const sameByBuiltin: Partial<DraftPost> = draft;
 
 console.log("draft (title만):", draft);
 
+// -?로 옵셔널 표시를 지운다.
+type MyRequired<T> = {
+  [K in keyof T]-?: T[K];
+};
+
+type BackToRequired = MyRequired<MyPartial<DraftPost>>;
+
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// const incomplete: BackToRequired = { title: "제목만" };
+// error TS2739: Type '{ title: string; }' is missing the following properties from type 'MyRequired<MyPartial<DraftPost>>': body, publishedAt
+
+const complete: BackToRequired = {
+  title: "완성된 글",
+  body: "본문",
+  publishedAt: new Date(),
+};
+
+console.log("complete (필드 모두):", complete);
+
 export {};
