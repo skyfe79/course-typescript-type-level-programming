@@ -82,3 +82,16 @@ if (isBooleanString(debugCandidate)) {
 
 const notBoolean: string = "yes";
 console.log(`is boolean string: ${isBooleanString(notBoolean)}`);
+
+function isLogLevel(raw: string): raw is "debug" | "info" | "warn" | "error" {
+  return (envSpec.LOG_LEVEL.values as readonly string[]).includes(raw);
+}
+
+const levelCandidate: string = "warn";
+if (isLogLevel(levelCandidate)) {
+  // 이 블록 안에서 levelCandidate의 타입은 "debug" | "info" | "warn" | "error"로 좁혀져 있다
+  console.log(`log level ok: ${levelCandidate}`);
+}
+
+const notLevel: string = "trace";
+console.log(`is log level: ${isLogLevel(notLevel)}`);
