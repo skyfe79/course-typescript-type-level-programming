@@ -15,4 +15,14 @@ console.log("firstHost:", firstHost);
 console.log("port:", port);
 console.log("hosts:", hosts);
 
+const emptyConfig: Config = {};
+
+function logAndReturnPort(): number {
+  console.log("getPort() called"); // 이 줄이 찍히면 단락되지 않은 것이다.
+  return 8080;
+}
+
+const emptyPort = emptyConfig.server?.hosts?.[logAndReturnPort()];
+console.log("emptyPort:", emptyPort);
+
 export {};
