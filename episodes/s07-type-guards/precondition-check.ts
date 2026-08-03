@@ -4,4 +4,14 @@ function assertNonEmpty(value: string | undefined, label: string): asserts value
   }
 }
 
+function main() {
+  const name = process.argv.at(2);
+  assertNonEmpty(name, "name");
+
+  console.log(name.trim().toUpperCase());
+  console.log(`Length: ${name.length}`);
+}
+
+main();
+
 export {};
