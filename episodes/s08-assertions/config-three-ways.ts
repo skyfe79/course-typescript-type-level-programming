@@ -34,4 +34,22 @@ const cfgAsserted = {
 const assertedLevel: LogLevel = cfgAsserted.level;
 console.log("asserted", assertedLevel);
 
+const cfgSatisfied = {
+  level: "info",
+  targets: ["console", "file"],
+} satisfies LogConfig;
+
+const exactLevel: "info" = cfgSatisfied.level;
+
+// satisfies는 검사하면서도 결과 타입을 원래 리터럴에 가깝게 남긴다.
+// 그래서 level은 넓은 LogLevel이 아니라 좁은 "info"로 보인다.
+console.log("satisfied", exactLevel, cfgSatisfied.targets.join(","));
+
+// as가 조용히 통과시킨 같은 string 값은 satisfies 자리에서 바로 잡힌다.
+// const cfgRejected = {
+//   level: readLevelFromEnv(),
+//   targets: ["console", "file"],
+// } satisfies LogConfig;
+// error TS2322: Type 'string' is not assignable to type 'LogLevel'.
+
 export {};
