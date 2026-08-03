@@ -49,4 +49,18 @@ try {
   // 실측 런타임 메시지: TypeError: dog.bark is not a function
 }
 
+// codeStep 182 — Dog로 좁힌 콜백이 Cat 호출을 컴파일 에러로 앞당기는 경로
+
+const handleDogEventSafe = (dog: Dog) => {
+  console.log(`${dog.name}가 짖습니다: ${dog.bark()}`);
+};
+
+handleDogEventSafe({ name: "바둑이", bark: () => "멍멍" });
+
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// handleDogEventSafe(cat);
+// episodes/s12-functions-variance/wide-callback-bug.ts(61,20): error TS2741: Property 'bark' is missing in type 'Cat' but required in type 'Dog'.
+
+console.log("요약 — 매개변수 타입을 정확히 좁히면 런타임 크래시가 컴파일 에러로 앞당겨진다.");
+
 export {};
