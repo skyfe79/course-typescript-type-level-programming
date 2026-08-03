@@ -89,27 +89,30 @@ if (rawPort === undefined) {
   outcomes.push({ kind: "invalid", name: "PORT", raw: rawPort });
 }
 
-// DEBUG·LOG_LEVEL은 값이 없을 때 기본값을 적용해야 하므로, 이번 절에서는 일단 missing으로만 채워 둔다
 const rawDebug = process.env.DEBUG;
 let debugValue = false;
 if (rawDebug === undefined) {
-  outcomes.push({ kind: "missing", name: "DEBUG" });
+  debugValue = envSpec.DEBUG.default ?? false;
+  outcomes.push({ kind: "defaulted", name: "DEBUG" });
 } else if (isBooleanString(rawDebug)) {
   debugValue = rawDebug === "true";
   outcomes.push({ kind: "valid", name: "DEBUG" });
 } else {
+  debugValue = envSpec.DEBUG.default ?? false;
   outcomes.push({ kind: "invalid", name: "DEBUG", raw: rawDebug });
 }
 
 const rawLogLevel = process.env.LOG_LEVEL;
-let logLevelValue: "debug" | "info" | "warn" | "error" = "info";
+let logLevelValue: "debug" | "info" | "warn" | "error" = envSpec.LOG_LEVEL.default ?? "info";
 if (rawLogLevel === undefined) {
-  outcomes.push({ kind: "missing", name: "LOG_LEVEL" });
+  outcomes.push({ kind: "defaulted", name: "LOG_LEVEL" });
 } else if (isLogLevel(rawLogLevel)) {
   logLevelValue = rawLogLevel;
   outcomes.push({ kind: "valid", name: "LOG_LEVEL" });
 } else {
   outcomes.push({ kind: "invalid", name: "LOG_LEVEL", raw: rawLogLevel });
 }
+// HOST·PORT는 기본값이 없으므로 앞 절의 missing 처리를 그대로 둔다
 
 console.log(outcomes);
+console.log(debugValue, logLevelValue);
