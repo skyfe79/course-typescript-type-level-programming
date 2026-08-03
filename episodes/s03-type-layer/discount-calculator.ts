@@ -8,4 +8,10 @@ const rateArg = process.argv[3];
 // 아래 줄의 주석을 해제하면 인자 타입 불일치 에러가 난다
 // console.log(applyDiscount(price, rateArg));
 
-console.log(applyDiscount(price, Number(rateArg)));
+type CliArgs = { price: number; rate: number };
+
+// 아래 줄의 주석을 해제하면 프로퍼티 이름 오타 에러가 난다
+// const typo: CliArgs = { price, rat: Number(rateArg) };
+
+const args: CliArgs = { price, rate: Number(rateArg) };
+console.log(applyDiscount(args.price, args.rate));
