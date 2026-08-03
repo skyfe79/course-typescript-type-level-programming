@@ -33,20 +33,18 @@ const envSpec = {
     values: ["debug", "info", "warn", "error"],
     default: "info",
   },
-} as const;
+} as const satisfies EnvSpec;
 const exactKind: "integer" = envSpec.PORT.kind;
-const exactValues: readonly ["debug", "info", "warn", "error"] =
-  envSpec.LOG_LEVEL.values;
 
-// kind에 FieldSpec에 없는 값 "enumm"을 일부러 넣었는데, as const는 얼리기만 할 뿐 이 오타를 잡지 못한다.
-const envSpecTypo = {
-  HOST: { kind: "string" },
-  PORT: { kind: "integer" },
-  DEBUG: { kind: "boolean", default: false },
-  LOG_LEVEL: {
-    kind: "enumm",
-    values: ["debug", "info", "warn", "error"],
-    default: "info",
-  },
-} as const;
-// 컴파일은 그대로 통과한다 — kind가 FieldSpec의 네 값 중 하나여야 한다는 것을 아무도 확인하지 않았다.
+// as const가 조용히 통과시킨 같은 실수는 satisfies 자리에서 잡힌다.
+// const envSpecTypoChecked = {
+//   HOST: { kind: "string" },
+//   PORT: { kind: "integer" },
+//   DEBUG: { kind: "boolean", default: false },
+//   LOG_LEVEL: {
+//     kind: "enumm",
+//     values: ["debug", "info", "warn", "error"],
+//     default: "info",
+//   },
+// } as const satisfies EnvSpec;
+// error TS2820: Type '"enumm"' is not assignable to type '"boolean" | "enum" | "integer" | "string"'. Did you mean '"enum"'?
