@@ -21,4 +21,22 @@ const wideEnvValue: string = spec.env.NODE_ENV;
 
 console.log("plain", widePort, wideEnvValue);
 
+const specFrozen = {
+  name: "envcheck",
+  port: 4000,
+  env: { NODE_ENV: "production", LOG_LEVEL: "info" },
+} as const;
+
+const exactPort: 4000 = specFrozen.port;
+const exactEnvValue: "production" = specFrozen.env.NODE_ENV;
+
+// as const는 값을 얼릴 뿐 ServiceSpec과 맞는지는 검사하지 않는다.
+const specFrozenWrong = {
+  name: "envcheck",
+  port: "4000",
+  env: { NODE_ENV: "production" },
+} as const;
+
+console.log("frozen", exactPort, exactEnvValue, specFrozenWrong.port);
+
 export {};
