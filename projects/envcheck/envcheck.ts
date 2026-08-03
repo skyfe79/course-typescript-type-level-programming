@@ -57,41 +57,78 @@ function isIntegerString(raw: string): raw is string {
   return /^-?\d+$/.test(raw);
 }
 
-const hostCandidate: string = "localhost";
-console.log(`host ok: ${isNonEmptyString(hostCandidate)}`);
-
-const portCandidate: string = "8080";
-if (isIntegerString(portCandidate)) {
-  const portNumber: number = Number(portCandidate);
-  console.log(`port ok: ${portNumber}`);
-}
-
-const notPort: string = "eighty";
-console.log(`is integer string: ${isIntegerString(notPort)}`);
-
 function isBooleanString(raw: string): raw is "true" | "false" {
   return raw === "true" || raw === "false";
 }
-
-const debugCandidate: string = "true";
-if (isBooleanString(debugCandidate)) {
-  // 이 블록 안에서 debugCandidate의 타입은 "true" | "false"로 좁혀져 있다
-  const debugValue: boolean = debugCandidate === "true";
-  console.log(`debug ok: ${debugValue}`);
-}
-
-const notBoolean: string = "yes";
-console.log(`is boolean string: ${isBooleanString(notBoolean)}`);
 
 function isLogLevel(raw: string): raw is "debug" | "info" | "warn" | "error" {
   return (envSpec.LOG_LEVEL.values as readonly string[]).includes(raw);
 }
 
-const levelCandidate: string = "warn";
-if (isLogLevel(levelCandidate)) {
-  // 이 블록 안에서 levelCandidate의 타입은 "debug" | "info" | "warn" | "error"로 좁혀져 있다
-  console.log(`log level ok: ${levelCandidate}`);
+const outcomes: FieldOutcome[] = [];
+
+const rawHost = process.env.HOST;
+let hostValue = "";
+if (rawHost === undefined) {
+  outcomes.push({ kind: "missing", name: "HOST" });
+} else if (isNonEmptyString(rawHost)) {
+  hostValue = rawHost;
+  outcomes.push({ kind: "valid", name: "HOST" });
+} else {
+  outcomes.push({ kind: "invalid", name: "HOST", raw: rawHost });
 }
 
-const notLevel: string = "trace";
-console.log(`is log level: ${isLogLevel(notLevel)}`);
+const rawPort = process.env.PORT;
+let portValue = 0;
+if (rawPort === undefined) {
+  outcomes.push({ kind: "missing", name: "PORT" });
+} else if (isIntegerString(rawPort)) {
+  portValue = Number(rawPort);
+  outcomes.push({ kind: "valid", name: "PORT" });
+} else {
+  outcomes.push({ kind: "invalid", name: "PORT", raw: rawPort });
+}
+
+const rawDebug = process.env.DEBUG;
+let debugValue = false;
+if (rawDebug === undefined) {
+  debugValue = envSpec.DEBUG.default ?? false;
+  outcomes.push({ kind: "defaulted", name: "DEBUG" });
+} else if (isBooleanString(rawDebug)) {
+  debugValue = rawDebug === "true";
+  outcomes.push({ kind: "valid", name: "DEBUG" });
+} else {
+  debugValue = envSpec.DEBUG.default ?? false;
+  outcomes.push({ kind: "invalid", name: "DEBUG", raw: rawDebug });
+}
+
+const rawLogLevel = process.env.LOG_LEVEL;
+let logLevelValue: "debug" | "info" | "warn" | "error" = envSpec.LOG_LEVEL.default ?? "info";
+if (rawLogLevel === undefined) {
+  outcomes.push({ kind: "defaulted", name: "LOG_LEVEL" });
+} else if (isLogLevel(rawLogLevel)) {
+  logLevelValue = rawLogLevel;
+  outcomes.push({ kind: "valid", name: "LOG_LEVEL" });
+} else {
+  outcomes.push({ kind: "invalid", name: "LOG_LEVEL", raw: rawLogLevel });
+}
+// HOST·PORT는 기본값이 없으므로 앞 절의 missing 처리를 그대로 둔다
+
+const envConfig: EnvConfig = {
+  HOST: hostValue,
+  PORT: portValue,
+  DEBUG: debugValue,
+  LOG_LEVEL: logLevelValue,
+};
+
+const report: EnvReport = {
+  outcomes,
+  ok: outcomes.every((o) => o.kind === "valid" || o.kind === "defaulted"),
+};
+
+console.log(JSON.stringify(report, null, 2));
+process.exitCode = report.ok ? 0 : 1;
+
+if (report.ok) {
+  console.log(`config ready: ${envConfig.HOST}:${envConfig.PORT} (${envConfig.LOG_LEVEL})`);
+}
