@@ -39,4 +39,23 @@ const specFrozenWrong = {
 
 console.log("frozen", exactPort, exactEnvValue, specFrozenWrong.port);
 
+const specComplete = {
+  name: "envcheck",
+  port: 4000,
+  env: { NODE_ENV: "production", LOG_LEVEL: "info" },
+} as const satisfies ServiceSpec;
+
+const exactPortComplete: 4000 = specComplete.port;
+const exactEnvComplete: "production" = specComplete.env.NODE_ENV;
+
+// as const가 조용히 통과시킨 같은 실수는 satisfies 자리에서 잡힌다.
+// const specWrongComplete = {
+//   name: "envcheck",
+//   port: "4000",
+//   env: { NODE_ENV: "production" },
+// } as const satisfies ServiceSpec;
+// error TS2322: Type 'string' is not assignable to type 'number'.
+
+console.log("complete", exactPortComplete, exactEnvComplete);
+
 export {};
