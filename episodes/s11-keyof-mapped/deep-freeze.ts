@@ -39,4 +39,32 @@ try {
 
 console.log("얕은 계약 — maxUsers 그대로:", settings.limits.maxUsers);
 
+// codeStep 169 — 재귀적 매핑된 타입 DeepReadonly<T> 작성
+
+// 객체면 키마다 한 단계 더 들어가고, 원시값에 닿으면 재귀를 멈춘다.
+type DeepReadonly<T> = T extends object
+  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+  : T;
+
+function deepFreeze<T extends object>(obj: T): DeepReadonly<T> {
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === "object") {
+      deepFreeze(value);
+    }
+  }
+
+  return Object.freeze(obj) as DeepReadonly<T>;
+}
+
+const frozenSettings = deepFreeze({
+  theme: "dark",
+  limits: { maxUsers: 10, maxProjects: 3 },
+});
+
+console.log("깊은 계약 — limits까지 얼었나:", Object.isFrozen(frozenSettings.limits));
+
+// 같은 재대입인데, 이제는 실행하기 전에 컴파일이 막는다.
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// frozenSettings.limits.maxUsers = 999;
+
 export {};
