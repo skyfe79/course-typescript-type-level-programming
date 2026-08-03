@@ -1,5 +1,8 @@
 function applyDiscount(price: number, rate: number): number {
-  return price - price * rate;
+  const result = price - price * rate;
+  // 아래 줄의 주석을 해제하면 반환 타입 불일치 에러가 난다
+  // return result + "";
+  return result;
 }
 
 const price = Number(process.argv[2]);
