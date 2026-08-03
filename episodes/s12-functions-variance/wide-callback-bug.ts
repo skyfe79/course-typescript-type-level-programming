@@ -33,4 +33,20 @@ const dog: Dog = {
 
 handleDogEvent(dog);
 
+// codeStep 181 — Animal로 통과한 Cat 호출이 런타임에서 깨지는 경로를 재현
+
+const cat: Cat = {
+  name: "나비",
+  meow() {
+    return "야옹";
+  },
+};
+
+try {
+  handleDogEvent(cat);
+} catch (error) {
+  console.log("컴파일은 통과했지만 실행이 막는다:", `${(error as Error).name}: ${(error as Error).message}`);
+  // 실측 런타임 메시지: TypeError: dog.bark is not a function
+}
+
 export {};
