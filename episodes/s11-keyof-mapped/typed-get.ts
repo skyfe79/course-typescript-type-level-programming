@@ -14,4 +14,17 @@ const typo = getLoose(user, "nam");
 console.log(typo);
 // undefined — 오타인데도 컴파일은 그대로 통과한다.
 
+// 객체 타입에서 가능한 키 이름만 K로 받으면, 호출하는 쪽의 문자열도 검사 대상이 된다.
+function get<T extends object, K extends keyof T>(obj: T, key: K) {
+  return obj[key];
+}
+
+const okName = get(user, "name");
+const okEmail = get(user, "email");
+console.log(okName, okEmail);
+
+// 반환 타입을 적지 않았는데도, 검사기는 key에 맞는 값의 타입을 따로 돌려준다.
+const checkName: string = get(user, "name");
+const checkId: number = get(user, "id");
+
 export {};
