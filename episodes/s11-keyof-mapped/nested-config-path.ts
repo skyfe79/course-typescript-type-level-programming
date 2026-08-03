@@ -37,4 +37,24 @@ const checkPortType: ServerPortType = 8080;
 // const wrongHost: ServerHostType = "127.0.0.1";
 // error TS2322: Type '"127.0.0.1"' is not assignable to type '"localhost"'.
 
+// 첫 경로에서만 우연히 맞은 게 아니라 경로마다 자기만의 정확한 타입을 돌려준다.
+type DarkModeType = AppConfig["features"]["darkMode"]; // 표시 타입: true
+
+const port = readAt(appConfig, "server", "port");
+const darkMode = readAt(appConfig, "features", "darkMode");
+
+const checkPort: 8080 = port;
+const checkDarkMode: true = darkMode;
+
+console.log(serverPortPath.join("."), port);
+console.log(darkModePath.join("."), darkMode);
+
+// port의 정확한 타입은 8080 하나뿐이라 다른 숫자는 대입되지 않는다.
+// const wrongPort: 9090 = port;
+// error TS2322: Type '8080' is not assignable to type '9090'.
+
+// darkMode도 마찬가지로 true 하나뿐이라 false는 대입되지 않는다.
+// const wrongDarkMode: DarkModeType = false;
+// error TS2322: Type 'false' is not assignable to type 'true'.
+
 export {};
