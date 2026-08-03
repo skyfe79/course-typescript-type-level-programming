@@ -14,6 +14,24 @@ const checkDirect: readonly ["GET", "POST", "DELETE"] = direct;
 // const mutableDirect: ["GET", "POST", "DELETE"] = direct;
 // error TS4104: The type 'readonly ["GET", "POST", "DELETE"]' is 'readonly' and cannot be assigned to the mutable type '["GET", "POST", "DELETE"]'.
 
-console.log(checkDirect);
+// 두 번째 호출 방식 — as const로 고정한 배열을 스프레드로 넘긴다.
+const methodList = ["GET", "POST"] as const;
+const viaSpread = defineAllowedMethods(...methodList);
+
+// as const를 빼면 배열이 선언 시점에 이미 string[]로 넓어지고, 받는 쪽의 const 타입 매개변수는
+// 그것을 리터럴로 되돌리지 못한다. 스프레드 호출에 as const가 필요한 이유이고,
+// 그래서 아래 두 줄은 막아 두었다.
+// const looseList = ["GET", "POST"];
+// const brokenSpread: readonly ["GET", "POST"] = defineAllowedMethods(...looseList);
+// error TS2322: Type 'string[]' is not assignable to type 'readonly ["GET", "POST"]'.
+
+// 세 번째 호출 방식 — 다른 함수를 거쳐 간접적으로 부른다.
+function registerRoute<const T extends readonly string[]>(...methods: T) {
+  return defineAllowedMethods(...methods);
+}
+
+const viaWrapper = registerRoute("PUT", "PATCH");
+
+console.log(checkDirect, viaSpread, viaWrapper);
 
 export {};
