@@ -19,4 +19,19 @@ const firstNum: number = first(nums);
 
 console.log(firstNum);
 
+const words = ["a", "b", "c"];
+const flags = [true, false];
+const users = [
+  { id: 1, name: "Ada" },
+  { id: 2, name: "Alan" },
+];
+
+const firstWord: string = first(words);
+const firstFlag: boolean = first(flags);
+const firstUser: { id: number; name: string } = first(users);
+
+console.log(firstWord);
+console.log(firstFlag);
+console.log(firstUser);
+
 export {};
