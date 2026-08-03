@@ -114,5 +114,21 @@ if (rawLogLevel === undefined) {
 }
 // HOST·PORT는 기본값이 없으므로 앞 절의 missing 처리를 그대로 둔다
 
-console.log(outcomes);
-console.log(debugValue, logLevelValue);
+const envConfig: EnvConfig = {
+  HOST: hostValue,
+  PORT: portValue,
+  DEBUG: debugValue,
+  LOG_LEVEL: logLevelValue,
+};
+
+const report: EnvReport = {
+  outcomes,
+  ok: outcomes.every((o) => o.kind === "valid" || o.kind === "defaulted"),
+};
+
+console.log(JSON.stringify(report, null, 2));
+process.exitCode = report.ok ? 0 : 1;
+
+if (report.ok) {
+  console.log(`config ready: ${envConfig.HOST}:${envConfig.PORT} (${envConfig.LOG_LEVEL})`);
+}
