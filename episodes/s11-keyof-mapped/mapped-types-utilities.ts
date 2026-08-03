@@ -39,4 +39,37 @@ const complete: BackToRequired = {
 
 console.log("complete (필드 모두):", complete);
 
+interface FrozenConfig {
+  readonly host: string;
+  readonly port: number;
+}
+
+const cfg: FrozenConfig = { host: "localhost", port: 5432 };
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// cfg.port = 5433;
+// error TS2540: Cannot assign to 'port' because it is a read-only property.
+
+// -readonly로 읽기 전용 표시를 벗긴다.
+type MyMutable<T> = {
+  -readonly [K in keyof T]: T[K];
+};
+
+const mutableCfg: MyMutable<FrozenConfig> = { ...cfg };
+console.log("mutableCfg (재대입 전):", mutableCfg);
+
+mutableCfg.port = 5433; // readonly가 벗겨져 재대입이 통과한다
+console.log("mutableCfg (재대입 후):", mutableCfg);
+
+// 세 타입 정의 비교 — 루프는 같고 수정자만 다르다.
+// type MyPartial<T> = {          // 3줄
+//   [K in keyof T]?: T[K];       //   ? 를 붙인다
+// };
+// type MyRequired<T> = {         // 3줄
+//   [K in keyof T]-?: T[K];      //   -? 로 지운다
+// };
+// type MyMutable<T> = {          // 3줄
+//   -readonly [K in keyof T]: T[K]; // -readonly 로 벗긴다
+// };
+// 합쳐서 아홉 줄이다.
+
 export {};
