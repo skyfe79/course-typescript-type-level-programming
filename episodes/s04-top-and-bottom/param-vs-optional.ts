@@ -40,3 +40,20 @@ function printNameLength(user: User): void {
 printNameLength({ name: "Ada" });
 // 옵셔널 프로퍼티는 키를 생략할 수 있으므로 빈 객체 호출도 통과한다.
 printNameLength({});
+
+function printLengthSafe(value: string | undefined): void {
+  console.log("length:", value?.length ?? "no value passed");
+}
+
+function printNameLengthSafe(user: User): void {
+  console.log("has name key:", "name" in user);
+  console.log("length:", user.name?.length ?? "no value passed");
+}
+
+printLengthSafe(undefined);
+printNameLengthSafe({});
+printNameLengthSafe({ name: undefined });
+
+// 매개변수는 값이 전달되어야 하지만, 그 값이 undefined일 수 있다.
+// 옵셔널 프로퍼티는 키가 없거나, 키는 있고 값이 undefined인 두 경우를 허용한다.
+// in 연산자는 이 두 객체 상태를 구분한다.
