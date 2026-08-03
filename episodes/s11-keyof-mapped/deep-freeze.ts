@@ -66,5 +66,30 @@ console.log("깊은 계약 — limits까지 얼었나:", Object.isFrozen(frozenS
 // 같은 재대입인데, 이제는 실행하기 전에 컴파일이 막는다.
 // (컴파일 실패 사례 — 주석 처리 + 진단 원문)
 // frozenSettings.limits.maxUsers = 999;
+// error TS2540: Cannot assign to 'maxUsers' because it is a read-only property.
+
+// codeStep 170 — 3단계 중첩에서 타입과 런타임이 같은 자리에서 막히는지 확인
+
+const config = deepFreeze({
+  service: "checkout",
+  network: { retries: 3, backoff: { baseMs: 100, factor: 2 } },
+});
+
+console.log("3단계 중첩 — backoff까지 얼었나:", Object.isFrozen(config.network.backoff));
+
+// 가장 깊은 backoff.factor까지 readonly라 재대입이 컴파일 단계에서 막힌다.
+// (컴파일 실패 사례 — 주석 처리 + 진단 원문)
+// config.network.backoff.factor = 3;
+// error TS2540: Cannot assign to 'factor' because it is a read-only property.
+
+// 아래 단언은 타입 검사만 벗겨 낼 뿐, 런타임의 동결 상태는 그대로다.
+// readonly를 푸는 방법이 아니라, 컴파일이 막은 자리를 실행해 보기 위한 우회다.
+try {
+  (config.network.backoff as { factor: number }).factor = 3;
+} catch (error) {
+  console.log("3단계 중첩 — 런타임도 같은 자리에서 막는다:", (error as Error).message);
+}
+
+console.log("3단계 중첩 — factor 그대로:", config.network.backoff.factor);
 
 export {};
