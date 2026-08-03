@@ -14,6 +14,7 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "workspaces": ["projects/*"],
   "bugs": {
     "url": "https://github.com/skyfe79/course-typescript-type-level-programming/issues"
   },
