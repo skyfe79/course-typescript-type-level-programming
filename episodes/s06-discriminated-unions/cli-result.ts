@@ -20,4 +20,14 @@ function reportResult(result: CommandResult): string {
   }
 }
 
+function runCommand(shouldFail: boolean): CommandResult {
+  if (shouldFail) {
+    return { status: "err", message: "file not found", exitCode: 1 };
+  }
+  return { status: "ok", output: "done" };
+}
+
+console.log(reportResult(runCommand(false)));
+console.log(reportResult(runCommand(true)));
+
 export {};
