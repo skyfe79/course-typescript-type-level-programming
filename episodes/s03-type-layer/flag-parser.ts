@@ -14,6 +14,10 @@ function parseMode(raw: string): Mode {
   throw new Error(`알 수 없는 --mode 값: ${raw}`);
 }
 
-const modeArg = process.argv[2]?.replace("--mode=", "") ?? "dev";
+// 아래 줄처럼 기본값에 오타를 내면, 실행해 보기도 전에 컴파일 에러가 난다
+// const brokenFallback: Mode = "dve";
+const fallback: Mode = "dev";
+
+const modeArg = process.argv[2]?.replace("--mode=", "") ?? fallback;
 const mode: Mode = parseMode(modeArg);
 console.log(`현재 모드: ${mode}`);
