@@ -11,9 +11,24 @@
 function parse(key: "count"): number;
 function parse(key: "deployedAt"): Date;
 function parse(key: string): { raw: string };
-// 그래서 다음 스텝에서 채울 본문 자리를 먼저 열어 둔다.
+
+// codeStep 177 — 구현 시그니처로 세 경우를 처리
+
+// 반환 타입은 세 오버로드의 반환 타입을 모두 덮을 만큼 넓어야 한다.
+// 실제 분기는 이 본문에 있고, 위 목록은 호출부가 보는 계약이다.
 function parse(key: string): number | Date | { raw: string } {
-  throw new Error("codeStep 177에서 채운다");
+  if (key === "count") return Number(rawConfig[key]);
+  if (key === "deployedAt") return new Date(rawConfig[key]);
+
+  return { raw: rawConfig[key] };
 }
+
+// rawConfig가 함수 아래에 있는 이유: 오버로드 목록과 구현 시그니처 사이에는 다른 선언을 끼울 수
+// 없다. 사이에 const 한 줄만 넣어도 위와 같은 TS2391이 난다.
+const rawConfig: Record<string, string> = {
+  count: "42",
+  deployedAt: "2026-01-15",
+  region: "ap-northeast-2",
+};
 
 export {};
