@@ -1,7 +1,12 @@
-const commandNames = ["add", "remove", "list"];
+const commandNames = ["add", "remove", "list"] as const;
 
-// 원소 타입이 string으로 넓어져서 목록에 없는 이름도 통과한다.
-const widenedName: typeof commandNames[number] = "adnd";
+type CommandName = typeof commandNames[number];
+
+const validName: CommandName = "add";
+
+// as const를 붙이기 전에는 통과하던 줄이다.
+// const invalidName: CommandName = "adnd";
+// error TS2820: Type '"adnd"' is not assignable to type '"add" | "list" | "remove"'. Did you mean '"add"'?
 
 const commandHandlers = {
   add: (arg: string) => `added ${arg}`,
