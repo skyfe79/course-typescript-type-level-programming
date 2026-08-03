@@ -25,4 +25,47 @@ console.log(store.value);
 // const typedStore: Store<string> = store;
 // error TS2322: Type 'Store<unknown>' is not assignable to type 'Store<string>'.
 
+const stringStore = createStore<string>();
+stringStore.set("hello");
+console.log(stringStore.value);
+// stringStore.set(42);
+// error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+
+function createBoundedStore<T extends string | number>(): Store<T> {
+  const store: Store<T> = {
+    value: undefined,
+    set(next) {
+      store.value = next;
+    },
+  };
+  return store;
+}
+
+const bounded = createBoundedStore();
+
+// 후보가 없어도 unknown까지 물러나지 않고 string | number 제약에 머문다.
+// 위의 store.set(true)는 통과하지만, 여기서는 제약 밖의 boolean이 막힌다.
+bounded.set(42);
+console.log(bounded.value);
+// bounded.set(true);
+// error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string | number'.
+
+function createStoreWith<T>(initial: T): Store<T> {
+  const store: Store<T> = {
+    value: initial,
+    set(next) {
+      store.value = next;
+    },
+  };
+  return store;
+}
+
+const readyStore = createStoreWith("ready");
+// 제약이 없는 타입 매개변수는 리터럴 후보를 넓힌 타입으로 받는다. 그래서 T는 "ready"가 아니라 string이다.
+// 증거는 바로 아래 두 줄이다 — set("go")는 통과하고, set(42)만 막힌다.
+console.log(readyStore.value);
+readyStore.set("go");
+// readyStore.set(42);
+// error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+
 export {};
