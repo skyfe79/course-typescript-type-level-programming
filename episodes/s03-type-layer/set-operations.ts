@@ -22,3 +22,9 @@ function label(figure: Figure): string {
 
 console.log(label({ kind: "circle", radius: 3 }));
 console.log(label({ kind: "square", side: 4 }));
+
+// 양쪽에 모두 속하는 값의 집합 — 겹치는 값이 없어 비어 있다
+type Impossible = string & number; // 호버: never
+
+// 아래 줄의 주석을 해제하면, 이 타입을 만족하는 값이 없어 컴파일 에러가 난다
+// const nothing: Impossible = "hello";
