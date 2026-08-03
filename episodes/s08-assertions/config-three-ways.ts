@@ -20,4 +20,18 @@ const anyLevel: LogLevel = cfgAnnotated.level;
 
 console.log("annotated", anyLevel, cfgAnnotated.targets.join(","));
 
+function readLevelFromEnv(): string {
+  return "verbose";
+}
+
+const cfgAsserted = {
+  level: readLevelFromEnv(),
+  targets: ["console", "file"],
+} as LogConfig;
+
+// as는 여기서 검사를 건너뛴다.
+// 타입은 LogLevel이라고 말하지만, 실제 값은 네 가지 로그 레벨 중 어디에도 없다.
+const assertedLevel: LogLevel = cfgAsserted.level;
+console.log("asserted", assertedLevel);
+
 export {};
