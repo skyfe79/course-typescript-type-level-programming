@@ -20,3 +20,14 @@ function printValue(v: PrimitiveValue): string {
       return formatBigint(v);
   }
 }
+
+const primitiveSamples: PrimitiveValue[] = [
+  "hello",
+  42,
+  true,
+  Symbol("id"),
+  9007199254740993n,
+];
+for (const sample of primitiveSamples) {
+  console.log(printValue(sample));
+}
