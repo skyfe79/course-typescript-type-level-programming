@@ -48,3 +48,50 @@ const exactKind: "integer" = envSpec.PORT.kind;
 //   },
 // } as const satisfies EnvSpec;
 // error TS2820: Type '"enumm"' is not assignable to type '"boolean" | "enum" | "integer" | "string"'. Did you mean '"enum"'?
+
+function isNonEmptyString(raw: string): raw is string {
+  return raw.length > 0;
+}
+
+function isIntegerString(raw: string): raw is string {
+  return /^-?\d+$/.test(raw);
+}
+
+const hostCandidate: string = "localhost";
+console.log(`host ok: ${isNonEmptyString(hostCandidate)}`);
+
+const portCandidate: string = "8080";
+if (isIntegerString(portCandidate)) {
+  const portNumber: number = Number(portCandidate);
+  console.log(`port ok: ${portNumber}`);
+}
+
+const notPort: string = "eighty";
+console.log(`is integer string: ${isIntegerString(notPort)}`);
+
+function isBooleanString(raw: string): raw is "true" | "false" {
+  return raw === "true" || raw === "false";
+}
+
+const debugCandidate: string = "true";
+if (isBooleanString(debugCandidate)) {
+  // 이 블록 안에서 debugCandidate의 타입은 "true" | "false"로 좁혀져 있다
+  const debugValue: boolean = debugCandidate === "true";
+  console.log(`debug ok: ${debugValue}`);
+}
+
+const notBoolean: string = "yes";
+console.log(`is boolean string: ${isBooleanString(notBoolean)}`);
+
+function isLogLevel(raw: string): raw is "debug" | "info" | "warn" | "error" {
+  return (envSpec.LOG_LEVEL.values as readonly string[]).includes(raw);
+}
+
+const levelCandidate: string = "warn";
+if (isLogLevel(levelCandidate)) {
+  // 이 블록 안에서 levelCandidate의 타입은 "debug" | "info" | "warn" | "error"로 좁혀져 있다
+  console.log(`log level ok: ${levelCandidate}`);
+}
+
+const notLevel: string = "trace";
+console.log(`is log level: ${isLogLevel(notLevel)}`);
