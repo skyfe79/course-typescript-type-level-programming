@@ -68,3 +68,17 @@ if (isIntegerString(portCandidate)) {
 
 const notPort: string = "eighty";
 console.log(`is integer string: ${isIntegerString(notPort)}`);
+
+function isBooleanString(raw: string): raw is "true" | "false" {
+  return raw === "true" || raw === "false";
+}
+
+const debugCandidate: string = "true";
+if (isBooleanString(debugCandidate)) {
+  // 이 블록 안에서 debugCandidate의 타입은 "true" | "false"로 좁혀져 있다
+  const debugValue: boolean = debugCandidate === "true";
+  console.log(`debug ok: ${debugValue}`);
+}
+
+const notBoolean: string = "yes";
+console.log(`is boolean string: ${isBooleanString(notBoolean)}`);
