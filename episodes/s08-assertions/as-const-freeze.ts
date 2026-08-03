@@ -31,4 +31,18 @@ const onlyProduction: typeof deployFrozen.env = "production";
 // deployFrozen.limits.cpu = 2;
 // error TS2540: Cannot assign to 'cpu' because it is a read-only property.
 
+function announceTags(pair: [string, string]) {
+  console.log(`${pair[0]} + ${pair[1]}`);
+}
+
+// 읽기 전용 튜플은 쓰기 가능한 튜플 자리에 넣을 수 없다.
+// announceTags(deployFrozen.tags);
+// error TS4104: The type 'readonly ["blue-green", "canary"]' is 'readonly' and cannot be assigned to the mutable type '[string, string]'.
+
+function announceTagsReadonly(pair: readonly [string, string]) {
+  console.log(`${pair[0]} + ${pair[1]}`);
+}
+
+announceTagsReadonly(deployFrozen.tags);
+
 export {};
