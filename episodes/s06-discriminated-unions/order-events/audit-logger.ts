@@ -14,6 +14,8 @@ function writeAuditLog(event: OrderEvent): string {
       return `${prefix}: 결제 (${event.amount}원)`;
     case "shipped":
       return `${prefix}: 배송 (${event.trackingId})`;
+    case "cancelled":
+      return `${prefix}: 취소 사유 기록 - ${event.reason}`;
     default: {
       const exhaustiveCheck: never = event;
       throw new Error(`감사 로그에 기록할 수 없는 이벤트: ${exhaustiveCheck}`);
@@ -23,3 +25,4 @@ function writeAuditLog(event: OrderEvent): string {
 
 console.log(writeAuditLog({ kind: "created", orderId: "ORD-001" }));
 console.log(writeAuditLog({ kind: "paid", orderId: "ORD-002", amount: 32000 }));
+console.log(writeAuditLog({ kind: "cancelled", orderId: "ORD-003", reason: "배송지 오류" }));
