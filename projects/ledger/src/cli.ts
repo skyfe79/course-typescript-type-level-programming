@@ -28,7 +28,9 @@
 
 import { decide, parseJournal, parseTransaction } from "./ledger.ts";
 import type { Command as CoreCommand, RawTransaction } from "./ledger.ts";
+import { runCommandDryRun } from "./dry-run-interpreter.ts";
 import { runCommand } from "./interpreter.ts";
+import type { Interpreter } from "./interpreter.ts";
 
 /*
  * 이 파일에도 명령행 표면을 나타내는 Command 타입이 있으므로, 순수 코어의
@@ -92,17 +94,18 @@ function runCoreCommand(
   command: CoreCommand,
   rawJournal: readonly RawTransaction[],
   rawInput: RawTransaction,
+  run: Interpreter,
 ): void {
   switch (command.kind) {
     case "appendTransaction":
-      runCommand({
+      run({
         kind: "writeJournal",
         path: JOURNAL_PATH,
         content: `${JSON.stringify([...rawJournal, rawInput], null, 2)}\n`,
       });
       break;
     case "printReport":
-      runCommand({ kind: "print", text: command.report });
+      run({ kind: "print", text: command.report });
       break;
     case "exit":
       process.exitCode = command.code;
@@ -116,32 +119,55 @@ function runCoreCommand(
  * 내리기 전에 멈춥니다.
  *
  * 이 함수 안에는 fs도 Date도 console도 없습니다. 바깥세상과 닿는 일은 전부
- * runCommand를 지나갑니다.
+ * 매개변수로 받은 Interpreter를 지나갑니다.
  */
-function runAdd(args: readonly string[]): void {
-  const journalText = runCommand({ kind: "readJournal", path: JOURNAL_PATH }) as string;
+function runAdd(args: readonly string[], run: Interpreter): void {
+  const journalText = run({ kind: "readJournal", path: JOURNAL_PATH }) as string;
   const rawJournal = JSON.parse(journalText) as RawTransaction[];
 
   const journal = parseJournal(rawJournal);
   if (!journal.ok) {
-    runCommand({ kind: "print", text: `저널을 읽지 못했습니다: ${journal.error}` });
+    run({ kind: "print", text: `저널을 읽지 못했습니다: ${journal.error}` });
     process.exitCode = 1;
     return;
   }
 
-  const now = runCommand({ kind: "readClock" }) as string;
+  const now = run({ kind: "readClock" }) as string;
   const rawInput = toRawTransaction(args, now, rawJournal.length + 1);
 
   for (const command of decide(journal.value, parseTransaction(rawInput))) {
-    runCoreCommand(command, rawJournal, rawInput);
+    runCoreCommand(command, rawJournal, rawInput, run);
   }
+}
+
+/*
+ * parseCommand는 아직 플래그를 모르는 단순한 표면 파서입니다. 그래서 add 인자에
+ * 섞여 들어온 --dry-run 같은 플래그는 add 실행 직전에 한 번 걸러 냅니다.
+ * 지금은 알 수 없는 --플래그도 조용히 빼고, 실제 거래 인자만 rest에 남깁니다.
+ */
+function takeFlags(args: readonly string[]): { rest: string[]; dryRun: boolean } {
+  const rest: string[] = [];
+  let dryRun = false;
+
+  for (const arg of args) {
+    if (!arg.startsWith("--")) {
+      rest.push(arg);
+      continue;
+    }
+
+    if (arg === "--dry-run") dryRun = true;
+  }
+
+  return { rest, dryRun };
 }
 
 function main(command: Command): void {
   switch (command.kind) {
-    case "add":
-      runAdd(command.args);
+    case "add": {
+      const { rest, dryRun } = takeFlags(command.args);
+      runAdd(rest, dryRun ? runCommandDryRun : runCommand);
       break;
+    }
     case "report":
       console.log("report 명령은 아직 구현되지 않았습니다.");
       console.log(`인자: ${command.args.join(", ")}`);
@@ -186,6 +212,43 @@ main(parseCommand(process.argv.slice(2)));
  * $ node src/cli.ts add 15000 점심
  * 기록 완료. 누적 차변 합계: 30000
  * 종료 코드: 0
+ *
+ * 이번 단계에서는 거래 두 개가 들어 있는 journal.json에서 시작해 드라이런
+ * 인터프리터를 끼워 보았습니다. 긴 JSON 출력 전체는 dry-run-interpreter.ts의
+ * 실측 기록에 적고, 여기서는 마지막 출력 줄과 파일 상태만 확인합니다.
+ *
+ * $ node src/cli.ts add 100 식비 --dry-run | tail -n 1
+ * [드라이런] 출력할 내용: 기록 완료. 누적 차변 합계: 30100
+ * 종료 코드: 0
+ *
+ * $ wc -c journal.json
+ *      745 journal.json
+ *
+ * $ shasum -a 256 journal.json
+ * ecaee8e1653fe2821fa99b8f65c5755523c5e5214743db7a54ae5f7f07366b1d  journal.json
+ *
+ * 플래그 없이 실행하면 기존 실행 인터프리터가 들어가므로 파일에 실제 거래가
+ * 하나 늘어납니다. 확인한 뒤 journal.json은 원래 내용으로 되돌렸습니다.
+ *
+ * $ node src/cli.ts add 100 식비
+ * 기록 완료. 누적 차변 합계: 30100
+ * 종료 코드: 0
+ *
+ * $ wc -c journal.json
+ *     1112 journal.json
+ *
+ * $ node -e 'const j=require("./journal.json"); console.log(j.length); console.log(j.at(-1).memo); console.log(j.at(-1).debit.amountMinor);'
+ * 3
+ * 식비
+ * 100
+ *
+ * journal.json 복원 뒤:
+ *
+ * $ wc -c journal.json
+ *      745 journal.json
+ *
+ * $ shasum -a 256 journal.json
+ * ecaee8e1653fe2821fa99b8f65c5755523c5e5214743db7a54ae5f7f07366b1d  journal.json
  *
  * 금액 자리에 숫자가 아닌 문자열을 넣으면 Number가 NaN을 만들고, makeMoney의 검사가
  * 그 NaN을 거부합니다. 예외가 아니라 값으로 돌아온 실패가 printReport 커맨드와

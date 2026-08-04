@@ -19,6 +19,9 @@ import * as fs from "node:fs";
  * 파일을 읽고 쓰는 방법을 알 필요가 없습니다. 도메인과 CLI가 파일 시스템을 직접
  * import하지 않으면, "무엇을 할지"를 정하는 코드와 "바깥세상에 어떻게 적용할지"를
  * 정하는 코드가 한 줄 안에서 섞이지 않습니다.
+ *
+ * §15에서 다룬 것처럼 같은 Interpreter 모양을 만족하는 함수라면 실행용,
+ * 드라이런용, 리플레이용 인터프리터를 같은 자리에 바꿔 끼울 수 있습니다.
  */
 
 type ReadJournalCommand = { readonly kind: "readJournal"; readonly path: string };
@@ -86,6 +89,7 @@ function runPrintCommand(cmd: PrintCommand): void {
  * 먼저 걸립니다.
  */
 type EffectCommand = ReadJournalCommand | WriteJournalCommand | ReadClockCommand | PrintCommand;
+type Interpreter = (cmd: EffectCommand) => string | void;
 
 function runCommand(cmd: EffectCommand): string | void {
   switch (cmd.kind) {
@@ -105,7 +109,7 @@ function runCommand(cmd: EffectCommand): string | void {
 
 // 이 파일은 최상위 실행문을 두지 않으므로, import 되어도 아무 일도 일어나지 않습니다.
 
-export type { EffectCommand, ReadJournalCommand, WriteJournalCommand, ReadClockCommand, PrintCommand };
+export type { EffectCommand, Interpreter, ReadJournalCommand, WriteJournalCommand, ReadClockCommand, PrintCommand };
 export { runCommand };
 
 /*
