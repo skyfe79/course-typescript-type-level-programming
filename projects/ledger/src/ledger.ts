@@ -385,6 +385,81 @@ function parseEntryLine(raw: RawEntryLine): Result<EntryLine> {
 console.log(parseEntryLine({ accountId: "acct-food", amountMinor: 15000, currency: "KRW", side: "debit" }));
 console.log(parseEntryLine({ accountId: "acct-food", currency: "KRW", side: "debit" }));
 
+/*
+ * 거래 하나 분량의 원시 JSON도 아직 아무것도 보장되지 않습니다.
+ * 그래서 헤더와 양쪽 분개 필드를 모두 선택적 unknown으로 두고, 파서가 필요한
+ * 모양을 하나씩 확인하게 합니다.
+ */
+type RawTransaction = {
+  kind?: unknown;
+  id?: unknown;
+  date?: unknown;
+  memo?: unknown;
+  debit?: unknown;
+  credit?: unknown;
+};
+
+/*
+ * 먼저 id, date, memo 같은 헤더 필드의 형태를 확인한 뒤 makeIsoDate,
+ * parseEntryLine, makeSimpleTransaction 순서로 도메인 값을 조립합니다.
+ * 함수 전체가 try/catch로 감싸여 있으므로, 이 호출들 중 무엇이 Error를
+ * 던지더라도 예외가 함수 밖으로 새지 않고 { ok: false, error } 값으로
+ * 바뀝니다. 이 함수가 예외를 값으로 옮기는 경계입니다.
+ */
+function parseTransaction(raw: RawTransaction): Result<Transaction> {
+  try {
+    if (typeof raw.id !== "string" || typeof raw.date !== "string" || typeof raw.memo !== "string") {
+      return { ok: false, error: `invalid transaction header: ${JSON.stringify(raw)}` };
+    }
+
+    const date = makeIsoDate(raw.date);
+
+    if (raw.kind === "simple") {
+      const debitResult = parseEntryLine(raw.debit as RawEntryLine);
+      const creditResult = parseEntryLine(raw.credit as RawEntryLine);
+      if (!debitResult.ok) return debitResult;
+      if (!creditResult.ok) return creditResult;
+
+      return {
+        ok: true,
+        value: makeSimpleTransaction(raw.id, date, raw.memo, debitResult.value, creditResult.value),
+      };
+    }
+
+    return { ok: false, error: `unknown transaction kind: ${JSON.stringify(raw.kind)}` };
+  } catch (err) {
+    // 아래층이 던진 오류 메시지를 그대로 error에 싣습니다.
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
+/*
+ * 균형이 맞는 원시 거래는 ok: true 안에 조립된 Transaction을 담습니다.
+ * 금액이 어긋난 원시 거래는 지난 화의 균형 검사가 낸 오류 메시지를 ok: false에
+ * 담습니다. 두 경우 모두 예외가 아니라 값으로 전달됩니다.
+ */
+console.log(
+  parseTransaction({
+    kind: "simple",
+    id: "tx-3",
+    date: "2026-08-02",
+    memo: "커피",
+    debit: { accountId: "acct-food", amountMinor: 4500, currency: "KRW", side: "debit" },
+    credit: { accountId: "acct-checking", amountMinor: 4500, currency: "KRW", side: "credit" },
+  }),
+);
+
+console.log(
+  parseTransaction({
+    kind: "simple",
+    id: "tx-bad-2",
+    date: "2026-08-02",
+    memo: "금액 불일치",
+    debit: { accountId: "acct-food", amountMinor: 4500, currency: "KRW", side: "debit" },
+    credit: { accountId: "acct-checking", amountMinor: 4000, currency: "KRW", side: "credit" },
+  }),
+);
+
 export {};
 
 /*
@@ -416,6 +491,21 @@ export {};
  *   ok: false,
  *   error: 'invalid entry line: {"accountId":"acct-food","currency":"KRW","side":"debit"}'
  * }
+ * {
+ *   ok: true,
+ *   value: {
+ *     kind: 'simple',
+ *     id: 'tx-3',
+ *     date: '2026-08-02',
+ *     memo: '커피',
+ *     debit: { accountId: 'acct-food', amount: [Object], side: 'debit' },
+ *     credit: { accountId: 'acct-checking', amount: [Object], side: 'credit' }
+ *   }
+ * }
+ * {
+ *   ok: false,
+ *   error: 'Unbalanced transaction tx-bad-2: debit 4500 != credit 4000'
+ * }
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -434,6 +524,9 @@ export {};
  * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
  * 이어지는 두 객체 출력은 parseEntryLine의 결과입니다. 필드가 모두 맞는 원시 값은 ok: true로
  * EntryLine까지 조립되고, amountMinor가 빠진 원시 값은 ok: false와 오류 문자열로 남습니다.
+ * 이번에 늘어난 두 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
+ * Transaction으로 조립되고, 금액이 어긋난 tx-bad-2는 균형 검사 오류 메시지를 담은 ok: false
+ * 값으로 전달됩니다.
  *
  * $ npx tsc -p .
  * 출력 없음
