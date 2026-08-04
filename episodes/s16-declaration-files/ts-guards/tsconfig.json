@@ -6,6 +6,13 @@
     "verbatimModuleSyntax": true,
     // 루트는 noEmit: true라 타입 검사만 하므로, 이 폴더에서만 자바스크립트 출력을 켭니다.
     "noEmit": false,
+    // declaration을 켜면 .js 옆에 그 파일의 타입만 담은 .d.ts가 함께 나옵니다.
+    "declaration": true,
+    // isolatedDeclarations는 declaration 없이 단독으로 켤 수 없습니다. 그러면
+    // error TS5069: Option 'isolatedDeclarations' cannot be specified without specifying option 'declaration' or option 'composite'. 로 멈춥니다.
+    // 이 두 옵션을 켠 지금 상태의 폴더 컴파일은 src/guards.ts 오류 하나를 일부러 드러내며, 다음 단계에서 없앱니다.
+    // 저장소 전체 타입 게이트 npx tsc --noEmit은 루트 설정에 이 플래그가 없어 그대로 통과합니다.
+    "isolatedDeclarations": true,
     // rootDir이 없으면 타입스크립트 7이 출력 경로를 정하지 못해 error TS5011로 멈춥니다.
     "rootDir": "src",
     // 컴파일된 자바스크립트를 직접 열어 보기 위해 dist 폴더로 내보냅니다.
