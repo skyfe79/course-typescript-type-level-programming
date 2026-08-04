@@ -23,7 +23,8 @@
     "node": "25.8.0"
   },
   "dependencies": {
-    "ascii-banner": "file:episodes/s16-declaration-files/vendor/ascii-banner"
+    "ascii-banner": "file:episodes/s16-declaration-files/vendor/ascii-banner",
+    "ts-guards": "file:episodes/s16-declaration-files/ts-guards"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

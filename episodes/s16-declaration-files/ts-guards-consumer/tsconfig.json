@@ -1,0 +1,9 @@
+{
+  // 이 폴더를 저장소 안의 별도 컨슈머 프로젝트로 검사하기 위한 설정입니다.
+  // 루트 설정을 extends하므로 strict, types: ["node"], erasableSyntaxOnly, noEmit을 그대로 물려받습니다.
+  // 타입스크립트 7에서는 tsconfig.json이 있는 폴더에서 npx tsc --noEmit main.ts처럼 파일명을
+  // 직접 넘기면 TS5112가 납니다. 그래서 파일명을 넘기지 않고
+  // npx tsc -p episodes/s16-declaration-files/ts-guards-consumer로 이 프로젝트를 검사합니다.
+  "extends": "../../../tsconfig.json",
+  "include": ["main.ts"]
+}
