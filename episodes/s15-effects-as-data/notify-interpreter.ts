@@ -55,3 +55,18 @@ function runCommand(command: NotificationCommand): void {
       break;
   }
 }
+
+// codeStep 228 — 코어에서 인터프리터 호출하기
+
+const orders: OrderStatus[] = [
+  { kind: "pickup", storeLocation: "강남점" },
+  { kind: "delivery", deliveryAddress: "서울시 마포구 …" },
+  { kind: "delayed", reason: "물량 부족" },
+];
+
+for (const order of orders) {
+  const command = decideNotification(order);
+  runCommand(command);
+}
+
+export {};
