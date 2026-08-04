@@ -38,4 +38,18 @@ const negativeHasNoAnswer: NegativeResult = 0;
 const [a = 3, b = 4] = process.argv.slice(2).map(Number);
 console.log(`${a} + ${b} = ${a + b}`);
 
+// 결과 튜플의 길이가 1998이어도 막히지 않는다. 두 피연산자를 따로따로 만들기 때문에
+// 한 번의 세기가 999에서 끝나고, 이어 붙이는 일은 세는 일이 아니다.
+type BigSum = Add<999, 999>;
+
+const bigSumIs1998: BigSum extends 1998 ? true : never = true;
+
+// 이쪽은 결과가 1001뿐인데도 막힌다. 첫 피연산자를 만드는 BuildTuple<1000> 하나가
+// 꼬리 형태 재귀의 천장에 닿기 때문이다. 한계는 결과가 아니라 피연산자에 걸린다.
+// @ts-expect-error - BuildTuple<1000>이 꼬리 형태 재귀의 천장을 넘는다 (TS2589)
+type TooBig = Add<1000, 1>;
+
+console.log("Add<999, 999>는 1998을 그대로 계산합니다.");
+console.log("반면 Add<1000, 1>은 결과가 1001인데도 막힙니다. 한계는 결과가 아니라 피연산자에 걸립니다.");
+
 export {};
