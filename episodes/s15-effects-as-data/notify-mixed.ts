@@ -21,4 +21,40 @@ function notifyCustomer(order: OrderFulfillmentSum): void {
 notifyCustomer({ kind: "pickup", storeLocation: "강남점" });
 // 이 함수를 테스트하려면 console.log 자체를 가로채는 장치가 필요하다
 
+// codeStep 221 — 이펙트를 반환값으로 분리하기
+
+type NotificationDescription =
+  | { channel: "email"; to: string; message: string }
+  | { channel: "sms"; to: string; message: string };
+
+function decideNotification(
+  order: OrderFulfillmentSum,
+): NotificationDescription {
+  if (order.kind === "pickup") {
+    return {
+      channel: "email",
+      to: order.storeLocation,
+      message: "픽업 준비 완료",
+    };
+  }
+  return {
+    channel: "sms",
+    to: order.deliveryAddress,
+    message: "배송 출발",
+  };
+}
+
+function sendNotification(description: NotificationDescription): void {
+  console.log(
+    `[${description.channel} 전송] ${description.to}: ${description.message}`,
+  );
+}
+
+const description = decideNotification({
+  kind: "pickup",
+  storeLocation: "강남점",
+});
+console.log(description);
+sendNotification(description);
+
 export {};
