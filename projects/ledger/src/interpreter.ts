@@ -50,6 +50,32 @@ function runFileCommand(cmd: ReadJournalCommand | WriteJournalCommand): string |
   fs.writeFileSync(cmd.path, cmd.content, "utf-8");
 }
 
+type ReadClockCommand = { readonly kind: "readClock" };
+type PrintCommand = { readonly kind: "print"; readonly text: string };
+
+/*
+ * readClock 커맨드는 필드가 하나도 없으므로 cmd 매개변수를 실제로 읽지 않습니다.
+ * 그래도 매개변수를 남겨 두면 파일, 시계, 표준출력 실행 함수가 모두 커맨드 하나를
+ * 받아 실행하는 같은 모양을 갖게 됩니다.
+ *
+ * 시계 읽기는 호출할 때마다 다른 값을 돌려주는 대표적인 부수 효과입니다. 그래서
+ * 순수 코어가 아니라 바깥세상과 만나는 이 인터프리터 파일에 둡니다.
+ */
+function runClockCommand(cmd: ReadClockCommand): string {
+  return new Date().toISOString();
+}
+
+/*
+ * 표준출력은 console.log가 아니라 process.stdout.write로 직접 실행합니다.
+ * 출력할 문자열은 커맨드 안에 이미 완성되어 있으므로, 인터프리터는 줄바꿈 하나를
+ * 붙여 그 문자열을 그대로 흘려보냅니다.
+ *
+ * 이제 파일, 시계, 표준출력 세 종류의 실제 부수 효과가 모두 이 파일 안에 있습니다.
+ */
+function runPrintCommand(cmd: PrintCommand): void {
+  process.stdout.write(cmd.text + "\n");
+}
+
 /*
  * 아래 호출은 다음 스텝들에서 실제 CLI 배선으로 바뀔 임시 확인 코드입니다.
  * 실행 위치는 projects/ledger이고, journal.json은 그 폴더 기준 상대경로입니다.
@@ -76,6 +102,14 @@ runFileCommand({
 console.log(runFileCommand({ kind: "readJournal", path: DEMO_JOURNAL_PATH }));
 
 /*
+ * 아래 두 호출도 이번 스텝에서 시계와 표준출력 인터프리터를 눈으로 확인하기 위한
+ * 임시 코드입니다. readClock 출력은 실행할 때마다 달라집니다.
+ */
+console.log(runClockCommand({ kind: "readClock" }));
+
+runPrintCommand({ kind: "print", text: "인터프리터가 직접 찍은 줄입니다." });
+
+/*
  * 실측 기록
  *
  * 실행 위치: projects/ledger
@@ -90,7 +124,12 @@ console.log(runFileCommand({ kind: "readJournal", path: DEMO_JOURNAL_PATH }));
  *    "credit":{"accountId":"acct-checking","amountMinor":2500,"currency":"KRW","side":"credit"}}
  * ]
  *
+ * 2026-08-04T11:33:48.497Z
+ * 인터프리터가 직접 찍은 줄입니다.
  * 종료 코드: 0
+ *
+ * 뒤의 두 줄이 이번 스텝에서 더한 시계와 표준출력입니다. ISO 시각은 실행할 때마다
+ * 달라지므로 위 값은 실측한 그 순간의 값입니다.
  *
  * 첫 줄 []는 파일이 없을 때 runFileCommand가 돌려주는 대체값입니다. 그다음
  * writeJournal이 journal.json을 실제로 만들었고, 두 번째 출력은 그 파일을 다시 읽은
