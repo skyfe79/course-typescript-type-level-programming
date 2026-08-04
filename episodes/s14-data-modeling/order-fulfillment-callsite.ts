@@ -28,4 +28,28 @@ console.log(
   describeFulfillmentProduct({ storeLocation: "강남점" }),
 );
 
+// codeStep 218 — 합 타입 버전 호출부
+
+type OrderFulfillmentSum =
+  | { kind: "pickup"; storeLocation: string }
+  | { kind: "delivery"; deliveryAddress: string };
+
+function describeFulfillmentSum(order: OrderFulfillmentSum): string {
+  switch (order.kind) {
+    case "pickup":
+      return `매장 픽업: ${order.storeLocation}`;
+    case "delivery":
+      return `배송: ${order.deliveryAddress}`;
+    default: {
+      const _exhaustive: never = order;
+      throw new Error("다루지 않은 kind");
+    }
+  }
+}
+
+console.log(
+  "합 타입 호출부:",
+  describeFulfillmentSum({ kind: "pickup", storeLocation: "강남점" }),
+);
+
 export {};
