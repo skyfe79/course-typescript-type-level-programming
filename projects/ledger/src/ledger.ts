@@ -19,20 +19,53 @@
  *            같은 계좌로 남습니다.
  *
  * 이번 화는 그 둘을 나눠 선언합니다. 값 객체를 먼저 만들고, 엔티티를 그 위에 얹습니다.
+ * 이제 AccountId, Money, IsoDate 세 값 타입은 모두 스마트 생성자를 거쳐야만
+ * 만들어지며, 각 생성자가 자기 값에 맞는 런타임 검증을 맡습니다.
  */
-
-// 아직은 단순한 문자열입니다. 다음 화에서 브랜드 타입으로 강화합니다.
-type AccountId = string;
 
 /*
- * 아직은 단순한 문자열입니다. 다음 화에서 브랜드 타입으로 강화합니다.
- *
- * 이번 화에서는 날짜 값을 선언만 해 둡니다. 실제 사용은 다음 화 이후
- * 거래 타입을 만들 때 시작합니다. 선언만 있어도 타입 검사는 통과합니다.
+ * AccountId는 문자열처럼 출력하고 비교할 수 있지만, 아무 문자열이나 계좌
+ * 식별자로 받을 수는 없도록 브랜드를 붙입니다.
  */
-type IsoDate = string;
+declare const accountIdBrand: unique symbol;
+type AccountId = string & { readonly [accountIdBrand]: true };
 
-interface Money {
+function makeAccountId(raw: string): AccountId {
+  if (raw.trim().length === 0) {
+    throw new Error(`AccountId must not be empty: "${raw}"`);
+  }
+
+  return raw as AccountId;
+}
+
+/*
+ * IsoDate는 문자열처럼 출력하고 저장할 수 있지만, YYYY-MM-DD 형식을 확인한
+ * 문자열만 날짜 값으로 다루도록 브랜드를 붙입니다.
+ *
+ * 실제 사용은 다음 화 이후 거래 타입을 만들 때 시작합니다. 지금은 생성자가
+ * 어떤 문자열을 통과시키고 거부하는지 확인하는 데 집중합니다.
+ */
+declare const isoDateBrand: unique symbol;
+type IsoDate = string & { readonly [isoDateBrand]: true };
+
+/*
+ * 세 스마트 생성자는 같은 원리를 서로 다른 검사로 적용합니다.
+ * makeAccountId는 빈 문자열, makeMoney는 정수와 범위, makeIsoDate는 형식만 봅니다.
+ * 여기서는 YYYY-MM-DD 모양만 확인합니다. 2026-13-45처럼 달력에 없는 날짜도
+ * 형식은 통과하며, 달력 검증은 이번 화의 범위가 아닙니다.
+ */
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function makeIsoDate(raw: string): IsoDate {
+  if (!ISO_DATE_PATTERN.test(raw)) {
+    throw new Error(`IsoDate must match YYYY-MM-DD (received "${raw}")`);
+  }
+
+  return raw as IsoDate;
+}
+
+declare const moneyBrand: unique symbol;
+type Money = {
   /*
    * 원 단위 정수를 저장합니다.
    *
@@ -44,11 +77,21 @@ interface Money {
    * 사실 하나를 "음수 대변"과 "양수 차변" 두 가지 방식으로 똑같이 나타낼 수
    * 있어, 실제로 필요한 상태 수보다 표현 가능한 상태 수가 두 배로 불어납니다.
    * 방향은 다음 화 이후 거래 타입에서 별도 필드 하나로만 나타냅니다.
+   *
+   * 이제 makeMoney가 이 결정을 실제 런타임 검증으로 강제합니다.
    */
   readonly amountMinor: number;
 
   // 이 실습 저장소의 ledger는 우선 원화만 다룹니다.
   readonly currency: "KRW";
+} & { readonly [moneyBrand]: true };
+
+function makeMoney(amountMinor: number, currency: "KRW"): Money {
+  if (!Number.isInteger(amountMinor) || amountMinor < 0) {
+    throw new Error(`Money.amountMinor must be a non-negative integer (received ${amountMinor})`);
+  }
+
+  return { amountMinor, currency } as Money;
 }
 
 function sameMoney(a: Money, b: Money): boolean {
@@ -60,8 +103,8 @@ function sameMoney(a: Money, b: Money): boolean {
  * 그런데도 sameMoney는 true를 돌려줍니다. 값 객체는 어디서 만들어졌는지가
  * 아니라 데이터만으로 같음을 판정하기 때문입니다.
  */
-const price1: Money = { amountMinor: 15000, currency: "KRW" };
-const price2: Money = { amountMinor: 15000, currency: "KRW" };
+const price1: Money = makeMoney(15000, "KRW");
+const price2: Money = makeMoney(15000, "KRW");
 
 console.log(sameMoney(price1, price2));
 
@@ -102,21 +145,48 @@ function sameAccount(a: Account, b: Account): boolean {
  *   sameMoney   — 이 둘은 같은 금액인가
  */
 const checkingBefore: Account = {
-  id: "acct-checking",
+  // AccountId는 생성자를 통과한 문자열만 대입할 수 있습니다.
+  id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
-  balance: { amountMinor: 500000, currency: "KRW" },
+  balance: makeMoney(500000, "KRW"),
 };
 
 const checkingAfter: Account = {
-  id: "acct-checking",
+  // 같은 원시 문자열이어도 순수 string 리터럴은 AccountId가 아닙니다.
+  id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
-  balance: { amountMinor: 485000, currency: "KRW" },
+  balance: makeMoney(485000, "KRW"),
 };
 
 console.log(sameAccount(checkingBefore, checkingAfter));
 console.log(sameMoney(checkingBefore.balance, checkingAfter.balance));
+
+function describeAccountId(id: AccountId): string {
+  return `계좌 ${id}`;
+}
+
+const checkingId = makeAccountId("acct-checking");
+console.log(describeAccountId(checkingId));
+
+// @ts-expect-error - 순수 string은 AccountId 브랜드가 없어 바로 넘길 수 없다
+describeAccountId("acct-checking");
+
+const lunchPrice = makeMoney(15000, "KRW");
+console.log(lunchPrice.amountMinor, lunchPrice.currency);
+
+// @ts-expect-error - 브랜드 없는 평범한 객체 리터럴은 Money 자리에 들어갈 수 없다
+const rawPrice: Money = { amountMinor: 15000, currency: "KRW" };
+
+const postedOn = makeIsoDate("2026-08-02");
+console.log(postedOn);
+
+try {
+  makeIsoDate("08/02/2026");
+} catch (err) {
+  console.log((err as Error).message);
+}
 
 export {};
 
@@ -129,12 +199,20 @@ export {};
  * true
  * true
  * false
+ * 계좌 acct-checking
+ * 15000 KRW
+ * 2026-08-02
+ * IsoDate must match YYYY-MM-DD (received "08/02/2026")
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
- * 둘째 줄과 셋째 줄이 이 화의 결론입니다. 같은 계좌의 두 시점을 놓고
+ * 둘째 줄과 셋째 줄은 같은 계좌의 두 시점을 놓고
  * sameAccount는 true, 그 잔액끼리의 sameMoney는 false를 돌려줍니다.
- * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다.
+ * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다. 넷째 줄은
+ * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다. 다섯째 줄은
+ * 검증된 Money도 일반 객체처럼 필드를 읽어 출력할 수 있음을 보여줍니다.
+ * 여섯째 줄은 형식을 통과한 IsoDate를 그대로 출력한 결과입니다. 일곱째 줄은
+ * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다.
  *
  * $ npx tsc -p .
  * 출력 없음
