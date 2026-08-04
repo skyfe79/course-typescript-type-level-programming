@@ -568,6 +568,34 @@ function decide(existing: readonly Transaction[], input: Result<Transaction>): r
   ];
 }
 
+/*
+ * 이 확인에는 파일도 시계도 실제 표준출력 경로도 필요하지 않습니다. 값 두 개를
+ * 만들어 decide에 넣고 돌아온 배열을 그대로 읽으면, 코어가 무엇을 하려 했는지
+ * 전부 드러납니다.
+ *
+ * 여기서 console.log는 이펙트를 실행하려고 쓰는 것이 아닙니다. decide가 돌려준
+ * 계획을 눈으로 확인하려고 쓸 뿐입니다. printReport 커맨드 안의 문자열은 아직
+ * 화면에 찍히지 않았고, 배열 원소로 들어 있을 뿐입니다.
+ *
+ * badInput은 파싱을 거치지 않고 손으로 만든 실패 값입니다. 실패 경로를 확인하는 데
+ * 실제로 깨진 입력 파일이 필요하지 않다는 뜻입니다.
+ */
+const noExisting: readonly Transaction[] = [];
+
+const goodInput = parseTransaction({
+  kind: "simple",
+  id: "tx-4",
+  date: "2026-08-03",
+  memo: "문구",
+  debit: { accountId: "acct-supplies", amountMinor: 3200, currency: "KRW", side: "debit" },
+  credit: { accountId: "acct-checking", amountMinor: 3200, currency: "KRW", side: "credit" },
+});
+
+const badInput: Result<Transaction> = { ok: false, error: "테스트용 실패" };
+
+console.log(decide(noExisting, goodInput));
+console.log(decide(noExisting, badInput));
+
 export {};
 
 /*
@@ -615,6 +643,25 @@ export {};
  *   error: 'Unbalanced transaction tx-bad-2: debit 4500 != credit 4000'
  * }
  * loaded 2 transactions
+ * [
+ *   {
+ *     kind: 'appendTransaction',
+ *     transaction: {
+ *       kind: 'simple',
+ *       id: 'tx-4',
+ *       date: '2026-08-03',
+ *       memo: '문구',
+ *       debit: [Object],
+ *       credit: [Object]
+ *     }
+ *   },
+ *   { kind: 'printReport', report: '기록 완료. 누적 차변 합계: 3200' },
+ *   { kind: 'exit', code: 0 }
+ * ]
+ * [
+ *   { kind: 'printReport', report: '기록 실패: 테스트용 실패' },
+ *   { kind: 'exit', code: 1 }
+ * ]
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -635,8 +682,10 @@ export {};
  * EntryLine까지 조립되고, amountMinor가 빠진 원시 값은 ok: false와 오류 문자열로 남습니다.
  * 그다음 두 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
  * Transaction으로 조립되고, 금액이 어긋난 tx-bad-2는 균형 검사 오류 메시지를 담은 ok: false
- * 값으로 전달됩니다. 마지막 줄은 원시 JSON 배열 하나가 parseJournal을 지나 두 개의
- * 검증된 Transaction 값으로 이어졌음을 보여줍니다.
+ * 값으로 전달됩니다. loaded 2 transactions 줄은 원시 JSON 배열 하나가 parseJournal을 지나
+ * 두 개의 검증된 Transaction 값으로 이어졌음을 보여줍니다. 그다음 두 배열 출력은
+ * decide의 성공 경로와 실패 경로가 각각 돌려준 커맨드 목록입니다. 파일을 만들거나
+ * 화면에 결과를 찍는 실제 동작은 아직 일어나지 않았습니다.
  *
  * $ npx tsc -p .
  * 출력 없음
