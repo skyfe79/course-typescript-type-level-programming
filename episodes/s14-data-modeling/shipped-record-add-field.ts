@@ -27,4 +27,20 @@ function formatReceiptLine(order: ParsedOrder): string {
   return `${order.orderId} x${order.quantity} = ${calculateTotalCents(order)}c`;
 }
 
+// codeStep 214 — 세 컨슈머가 그대로 컴파일되는지 확인
+
+function formatGiftNote(order: ParsedOrder): string {
+  return order.giftMessage ?? "(no gift message)";
+}
+
+const shipped: ParsedOrder = {
+  orderId: "o-42",
+  quantity: 2,
+  unitPriceCents: 900,
+  giftMessage: "생일 축하해요",
+};
+
+console.log(formatReceiptLine(shipped));
+console.log(formatGiftNote(shipped));
+
 export {};
