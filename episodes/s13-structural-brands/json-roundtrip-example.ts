@@ -28,4 +28,8 @@ const original = createUserId("u-42");
 const payload = JSON.stringify({ id: original });
 console.log(payload); // {"id":"u-42"}
 
+// codeStep 199 — 역직렬화된 값에 재진입 체크포인트 적용
+const parsedPayload = JSON.parse(payload) as { id: string };
+const restored = parseUserId(parsedPayload.id);
+
 export {};
