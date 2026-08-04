@@ -47,8 +47,9 @@ jspm_packages/
 !episodes/s16-declaration-files/resolve-demo/node_modules/
 !episodes/s16-declaration-files/resolve-demo/node_modules/**
 
-# 강의 실습 산출물 (§17 ledger — ep_121 인터프리터가 만드는 저널 파일)
+# 강의 실습 산출물 (§17 ledger — 인터프리터가 만드는 저널 파일과 실행 로그)
 projects/ledger/journal.json
+projects/ledger/run-log.json
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
