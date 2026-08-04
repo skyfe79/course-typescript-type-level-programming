@@ -19,4 +19,10 @@ console.log("정확한 리터럴은 통과한다:", validate({ strict: true }));
 // validate({ strict: true, timeout: 5000 });
 // episodes/s13-structural-brands/freshness-boundary.ts(19,26): error TS2353: Object literal may only specify known properties, and 'timeout' does not exist in type 'CheckOptions'.
 
+// codeStep 191 — 변수에 먼저 저장해 전달
+
+const opts = { strict: true, timeout: 5000 };
+
+console.log("변수를 거치면 같은 값도 통과한다:", validate(opts));
+
 export {};
