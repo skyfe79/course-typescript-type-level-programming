@@ -19,6 +19,8 @@
  *            같은 계좌로 남습니다.
  *
  * 이번 화는 그 둘을 나눠 선언합니다. 값 객체를 먼저 만들고, 엔티티를 그 위에 얹습니다.
+ * 이제 AccountId, Money, IsoDate 세 값 타입은 모두 스마트 생성자를 거쳐야만
+ * 만들어지며, 각 생성자가 자기 값에 맞는 런타임 검증을 맡습니다.
  */
 
 /*
@@ -37,12 +39,30 @@ function makeAccountId(raw: string): AccountId {
 }
 
 /*
- * 아직은 단순한 문자열입니다. 다음 화에서 브랜드 타입으로 강화합니다.
+ * IsoDate는 문자열처럼 출력하고 저장할 수 있지만, YYYY-MM-DD 형식을 확인한
+ * 문자열만 날짜 값으로 다루도록 브랜드를 붙입니다.
  *
- * 이번 화에서는 날짜 값을 선언만 해 둡니다. 실제 사용은 다음 화 이후
- * 거래 타입을 만들 때 시작합니다. 선언만 있어도 타입 검사는 통과합니다.
+ * 실제 사용은 다음 화 이후 거래 타입을 만들 때 시작합니다. 지금은 생성자가
+ * 어떤 문자열을 통과시키고 거부하는지 확인하는 데 집중합니다.
  */
-type IsoDate = string;
+declare const isoDateBrand: unique symbol;
+type IsoDate = string & { readonly [isoDateBrand]: true };
+
+/*
+ * 세 스마트 생성자는 같은 원리를 서로 다른 검사로 적용합니다.
+ * makeAccountId는 빈 문자열, makeMoney는 정수와 범위, makeIsoDate는 형식만 봅니다.
+ * 여기서는 YYYY-MM-DD 모양만 확인합니다. 2026-13-45처럼 달력에 없는 날짜도
+ * 형식은 통과하며, 달력 검증은 이번 화의 범위가 아닙니다.
+ */
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function makeIsoDate(raw: string): IsoDate {
+  if (!ISO_DATE_PATTERN.test(raw)) {
+    throw new Error(`IsoDate must match YYYY-MM-DD (received "${raw}")`);
+  }
+
+  return raw as IsoDate;
+}
 
 declare const moneyBrand: unique symbol;
 type Money = {
@@ -159,6 +179,15 @@ console.log(lunchPrice.amountMinor, lunchPrice.currency);
 // @ts-expect-error - 브랜드 없는 평범한 객체 리터럴은 Money 자리에 들어갈 수 없다
 const rawPrice: Money = { amountMinor: 15000, currency: "KRW" };
 
+const postedOn = makeIsoDate("2026-08-02");
+console.log(postedOn);
+
+try {
+  makeIsoDate("08/02/2026");
+} catch (err) {
+  console.log((err as Error).message);
+}
+
 export {};
 
 /*
@@ -172,6 +201,8 @@ export {};
  * false
  * 계좌 acct-checking
  * 15000 KRW
+ * 2026-08-02
+ * IsoDate must match YYYY-MM-DD (received "08/02/2026")
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -180,6 +211,8 @@ export {};
  * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다. 넷째 줄은
  * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다. 다섯째 줄은
  * 검증된 Money도 일반 객체처럼 필드를 읽어 출력할 수 있음을 보여줍니다.
+ * 여섯째 줄은 형식을 통과한 IsoDate를 그대로 출력한 결과입니다. 일곱째 줄은
+ * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다.
  *
  * $ npx tsc -p .
  * 출력 없음
