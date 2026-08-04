@@ -44,4 +44,18 @@ function parseOrder(raw: RawInput): Result<ParsedOrder> {
   return { ok: false, error: "invalid order payload" };
 }
 
+// codeStep 209 — ParsedOrder만 받는 다운스트림 함수 세 개
+
+function calculateTotalCents(order: ParsedOrder): number {
+  return order.quantity * order.unitPriceCents;
+}
+
+function applyDiscount(order: ParsedOrder, percentOff: number): number {
+  return calculateTotalCents(order) * (1 - percentOff / 100);
+}
+
+function formatReceiptLine(order: ParsedOrder): string {
+  return `${order.orderId} x${order.quantity} = ${calculateTotalCents(order)}c`;
+}
+
 export {};
