@@ -1,0 +1,9 @@
+{
+  "name": "ts-guards-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ts-guards": "file:../ts-guards"
+  }
+}
