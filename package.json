@@ -22,6 +22,9 @@
   "volta": {
     "node": "25.8.0"
   },
+  "dependencies": {
+    "ascii-banner": "file:episodes/s16-declaration-files/vendor/ascii-banner"
+  },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "typescript": "^7.0.2"
