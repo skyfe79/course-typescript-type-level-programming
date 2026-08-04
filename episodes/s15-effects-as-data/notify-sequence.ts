@@ -13,7 +13,9 @@ type OrderStatus =
 type NotificationCommand =
   | { kind: "sendEmail"; to: string; subject: string; body: string }
   | { kind: "sendSms"; to: string; body: string }
-  | { kind: "log"; message: string };
+  | { kind: "log"; message: string }
+  | { kind: "fail"; reason: string }
+  | { kind: "retry"; attempt: number; command: NotificationCommand };
 
 function decideNotification(order: OrderStatus): NotificationCommand {
   switch (order.kind) {
@@ -52,6 +54,13 @@ function runCommand(command: NotificationCommand): void {
     case "log":
       console.log(`[로그] ${command.message}`);
       break;
+    case "fail":
+      console.log(`[실패] ${command.reason}`);
+      break;
+    case "retry":
+      console.log(`[재시도 ${command.attempt}번째]`);
+      runCommand(command.command);
+      break;
   }
 }
 
@@ -73,3 +82,19 @@ function runSequence(commands: NotificationCommand[]): void {
 }
 
 runSequence(escalationSequence);
+
+// codeStep 233 — 실패 명령과 재시도 표현하기
+
+const flakySequence: NotificationCommand[] = [
+  { kind: "sendSms", to: "010-0000-0000", body: "1차 알림" },
+  { kind: "fail", reason: "SMS 게이트웨이 응답 없음" },
+  {
+    kind: "retry",
+    attempt: 1,
+    command: { kind: "sendSms", to: "010-0000-0000", body: "1차 알림" },
+  },
+];
+
+runSequence(flakySequence);
+
+export {};
