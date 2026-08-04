@@ -71,4 +71,22 @@ console.log(
 );
 console.log(`네 번째 열은 Date로 남아 getUTCFullYear를 부를 수 있고, 결과는 ${firstQuadDateYear}입니다.`);
 
+// 같은 행 안에서도 자리마다 다른 타입이 남아 있어 잘못된 대입이 막힌다.
+// 이 두 줄이 오류로 잡힌다는 사실 자체가 열 타입이 끝까지 살아남았다는 증거다.
+const row = triples[0];
+
+// @ts-expect-error - 0번 자리는 number라서 문자열을 넣을 수 없다.
+row[0] = "not a number";
+// 실측 진단(위 @ts-expect-error 한 줄을 같은 줄 수의 다른 주석으로 바꿔 지시문만 껐을 때):
+// episodes/s22-tuples-variadics/zip-lab.ts(79,1): error TS2322: Type 'string' is not assignable to type 'number'.
+
+// @ts-expect-error - 2번 자리는 boolean이라서 숫자를 넣을 수 없다.
+row[2] = 123;
+// 실측 진단(위 @ts-expect-error 한 줄을 같은 줄 수의 다른 주석으로 바꿔 지시문만 껐을 때):
+// episodes/s22-tuples-variadics/zip-lab.ts(84,1): error TS2322: Type 'number' is not assignable to type 'boolean'.
+
+// 막고 있는 것은 타입 검사뿐이라, 지시문으로 누른 두 줄은 실행되어 값을 바꿔 놓는다.
+console.log(`지시문으로 누른 두 줄이 실행된 뒤 행의 값은 ${JSON.stringify(row)}입니다.`);
+console.log("오늘의 결과는 배열 개수가 늘어나도 각 열의 타입을 끝까지 지키는 zip입니다.");
+
 export {};
