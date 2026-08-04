@@ -27,4 +27,28 @@ const libraryReturn: ReturnType<typeof formatUser> = formatUser(1);
 const mineReturn: FormatUserReturn = libraryReturn;
 const backToLibraryReturn: ReturnType<typeof formatUser> = mineReturn;
 
+// MyParameters<T>는 함수 타입의 매개변수 목록 자리에 infer P라는 이름을 붙인다.
+// 매개변수 목록은 하나의 튜플 타입으로 잡히므로 원래 함수 호출 모양을 그대로 담을 수 있다.
+type MyParameters<T> = T extends (...args: infer P) => any ? P : never;
+
+// FormatUserParams는 formatUser가 받는 매개변수 목록을 튜플로 꺼낸다.
+// 이름 붙은 매개변수 정보까지 따라와 편집기에서는 [id: number]처럼 표시된다.
+type FormatUserParams = MyParameters<typeof formatUser>;   // [id: number]
+
+// callWithParams는 캡처한 매개변수 튜플을 스프레드해 formatUser를 다시 호출한다.
+// 원래 함수가 그 튜플을 그대로 받으면 매개변수 목록과 정확히 같다는 실행 가능한 증명이 된다.
+function callWithParams(params: FormatUserParams): string {
+  return formatUser(...params);
+}
+
+// 배열 리터럴 [9]는 FormatUserParams의 튜플 모양에 맞는 호출 인자다.
+// 스프레드된 값이 formatUser로 들어가므로 런타임 출력도 같은 규칙을 따른다.
+console.log(callWithParams([9]));
+
+// Parameters도 표준 타입에서 직접 만든 타입으로, 다시 표준 타입으로 값을 옮긴다.
+// 두 방향 대입이 모두 통과하면 [id: number]라는 매개변수 튜플 결과가 서로 같다는 뜻이다.
+const libraryParams: Parameters<typeof formatUser> = [1];
+const mineParams: FormatUserParams = libraryParams;
+const backToLibraryParams: Parameters<typeof formatUser> = mineParams;
+
 export {};
