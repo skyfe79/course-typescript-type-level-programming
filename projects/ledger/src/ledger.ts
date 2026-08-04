@@ -228,6 +228,72 @@ type SplitTransaction = {
 
 type Transaction = SimpleTransaction | SplitTransaction;
 
+function sumMinor(lines: readonly EntryLine[]): number {
+  return lines.reduce((total, line) => total + line.amount.amountMinor, 0);
+}
+
+/*
+ * 생성자는 거래 값을 조립하기 전에 먼저 차변과 대변의 균형을 확인합니다.
+ * 균형이 맞을 때만 값을 내놓으므로, 불균형 거래는 만들어진 뒤에 검사해서
+ * 거르는 대상이 아니라 애초에 존재할 수 없는 값이 됩니다.
+ */
+function makeSimpleTransaction(
+  id: string,
+  date: IsoDate,
+  memo: string,
+  debit: EntryLine,
+  credit: EntryLine,
+): SimpleTransaction {
+  if (debit.amount.amountMinor !== credit.amount.amountMinor) {
+    throw new Error(
+      `Unbalanced transaction ${id}: debit ${debit.amount.amountMinor} != credit ${credit.amount.amountMinor}`,
+    );
+  }
+
+  return { kind: "simple", id, date, memo, debit, credit };
+}
+
+// 분할 거래는 두 쪽의 합계를 sumMinor로 구해 비교합니다.
+// 실제 split 값은 다음 절에서 만들어 쓰고, 여기서는 생성자만 선언해 둡니다.
+function makeSplitTransaction(
+  id: string,
+  date: IsoDate,
+  memo: string,
+  debits: readonly EntryLine[],
+  credits: readonly EntryLine[],
+): SplitTransaction {
+  const debitTotal = sumMinor(debits);
+  const creditTotal = sumMinor(credits);
+
+  if (debitTotal !== creditTotal) {
+    throw new Error(`Unbalanced transaction ${id}: debits ${debitTotal} != credits ${creditTotal}`);
+  }
+
+  return { kind: "split", id, date, memo, debits, credits };
+}
+
+const lunch = makeSimpleTransaction(
+  "tx-1",
+  makeIsoDate("2026-08-01"),
+  "점심",
+  { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "debit" },
+  { accountId: makeAccountId("acct-checking"), amount: makeMoney(15000, "KRW"), side: "credit" },
+);
+console.log(lunch.kind, lunch.debit.amount.amountMinor);
+
+try {
+  makeSimpleTransaction(
+    "tx-bad",
+    makeIsoDate("2026-08-01"),
+    "잘못 입력",
+    { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "debit" },
+    { accountId: makeAccountId("acct-checking"), amount: makeMoney(12000, "KRW"), side: "credit" },
+  );
+} catch (err) {
+  // tx-bad의 try/catch는 불균형 거래가 애초에 값으로 존재할 수 없음을 실행으로 보여줍니다.
+  console.log((err as Error).message);
+}
+
 export {};
 
 /*
@@ -243,6 +309,8 @@ export {};
  * 15000 KRW
  * 2026-08-02
  * IsoDate must match YYYY-MM-DD (received "08/02/2026")
+ * simple 15000
+ * Unbalanced transaction tx-bad: debit 15000 != credit 12000
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -252,7 +320,10 @@ export {};
  * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다. 다섯째 줄은
  * 검증된 Money도 일반 객체처럼 필드를 읽어 출력할 수 있음을 보여줍니다.
  * 여섯째 줄은 형식을 통과한 IsoDate를 그대로 출력한 결과입니다. 일곱째 줄은
- * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다.
+ * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다. 여덟째 줄은
+ * 균형이 맞는 단순 거래가 생성되어 simple 갈래와 금액을 바로 읽을 수 있음을 보여줍니다.
+ * 아홉째 줄은 tx-bad가 생성자 안의 균형 검사를 통과하지 못해 값으로 만들어지지 않았음을
+ * try/catch로 확인한 오류 메시지입니다.
  *
  * $ npx tsc -p .
  * 출력 없음
