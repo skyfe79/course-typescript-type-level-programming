@@ -28,4 +28,14 @@ greetUser(rawId);
 // episodes/s13-structural-brands/user-id-example.ts(25,11): error TS2345: Argument of type 'string' is not assignable to parameter of type 'UserId'.
 //   Type 'string' is not assignable to type '{ readonly [brand]: "UserId"; }'.
 
+// codeStep 196 — 스마트 생성자를 거친 값으로 통과
+
+const brandedId = createUserId("u-42");
+console.log(greetUser(brandedId)); // OK
+
+console.log("rawId와 brandedId는 런타임에서 같은 값인가:", rawId === brandedId);
+console.log("rawId의 런타임 typeof:", typeof rawId);
+console.log("brandedId의 런타임 typeof:", typeof brandedId);
+console.log("요약 — 런타임 값은 같지만, 순수 string 호출은 실패하고 UserId 호출은 통과한다.");
+
 export {};
