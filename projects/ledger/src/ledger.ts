@@ -21,8 +21,20 @@
  * 이번 화는 그 둘을 나눠 선언합니다. 값 객체를 먼저 만들고, 엔티티를 그 위에 얹습니다.
  */
 
-// 아직은 단순한 문자열입니다. 다음 화에서 브랜드 타입으로 강화합니다.
-type AccountId = string;
+/*
+ * AccountId는 문자열처럼 출력하고 비교할 수 있지만, 아무 문자열이나 계좌
+ * 식별자로 받을 수는 없도록 브랜드를 붙입니다.
+ */
+declare const accountIdBrand: unique symbol;
+type AccountId = string & { readonly [accountIdBrand]: true };
+
+function makeAccountId(raw: string): AccountId {
+  if (raw.trim().length === 0) {
+    throw new Error(`AccountId must not be empty: "${raw}"`);
+  }
+
+  return raw as AccountId;
+}
 
 /*
  * 아직은 단순한 문자열입니다. 다음 화에서 브랜드 타입으로 강화합니다.
@@ -102,14 +114,16 @@ function sameAccount(a: Account, b: Account): boolean {
  *   sameMoney   — 이 둘은 같은 금액인가
  */
 const checkingBefore: Account = {
-  id: "acct-checking",
+  // AccountId는 생성자를 통과한 문자열만 대입할 수 있습니다.
+  id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
   balance: { amountMinor: 500000, currency: "KRW" },
 };
 
 const checkingAfter: Account = {
-  id: "acct-checking",
+  // 같은 원시 문자열이어도 순수 string 리터럴은 AccountId가 아닙니다.
+  id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
   balance: { amountMinor: 485000, currency: "KRW" },
@@ -117,6 +131,16 @@ const checkingAfter: Account = {
 
 console.log(sameAccount(checkingBefore, checkingAfter));
 console.log(sameMoney(checkingBefore.balance, checkingAfter.balance));
+
+function describeAccountId(id: AccountId): string {
+  return `계좌 ${id}`;
+}
+
+const checkingId = makeAccountId("acct-checking");
+console.log(describeAccountId(checkingId));
+
+// @ts-expect-error - 순수 string은 AccountId 브랜드가 없어 바로 넘길 수 없다
+describeAccountId("acct-checking");
 
 export {};
 
@@ -129,12 +153,14 @@ export {};
  * true
  * true
  * false
+ * 계좌 acct-checking
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
- * 둘째 줄과 셋째 줄이 이 화의 결론입니다. 같은 계좌의 두 시점을 놓고
+ * 둘째 줄과 셋째 줄은 같은 계좌의 두 시점을 놓고
  * sameAccount는 true, 그 잔액끼리의 sameMoney는 false를 돌려줍니다.
- * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다.
+ * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다. 넷째 줄은
+ * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다.
  *
  * $ npx tsc -p .
  * 출력 없음
