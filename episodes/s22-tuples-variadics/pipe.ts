@@ -60,3 +60,31 @@ const runTypeCheck: (arg: string) => string = run;
 const runResult: string = runTypeCheck("  type level programming  ");
 
 console.log(run(process.argv[2] ?? ""));
+
+// 일부러 string을 받아야 하는 자리에 number를 받는 average를 끼워 넣으면 함수 사슬 전체가
+// never 자리로 접힌다. 그래서 컴파일러 진단은 "세 번째 인자만 틀렸다"가 아니라
+// "인자 목록 전체가 pipe의 매개변수 never에 들어갈 수 없다"로 나온다.
+const average = (n: number) => n / 2;
+
+// @ts-expect-error - toUpperCase의 반환값 string을 average의 매개변수 number가 받을 수 없다.
+const brokenRun = pipe(trim, toUpperCase, average, double, toLabel);
+// 실측 진단(위 @ts-expect-error 한 줄을 같은 줄 수의 다른 주석으로 바꿔 지시문만 껐을 때):
+// episodes/s22-tuples-variadics/pipe.ts(70,24): error TS2345: Argument of type '[(s: string) => string, (s: string) => string, (n: number) => number, (n: number) => number, (n: number) => string]' is not assignable to parameter of type 'never'.
+
+// 어느 연결이 깨졌는지 보고 싶다면 pipe() 호출 진단만 보지 말고 Chain을 직접 평가해 본다.
+// 좋은 사슬은 true로 남고, average가 들어간 사슬은 false로 접힌다.
+type GoodPipeChain = Chain<[typeof trim, typeof toUpperCase, typeof countWords, typeof double, typeof toLabel]>;
+type BrokenPipeChain = Chain<[typeof trim, typeof toUpperCase, typeof average, typeof double, typeof toLabel]>;
+type UpperToAverage = Chain<[typeof toUpperCase, typeof average]>;
+
+// 각 검사 결과를 그 자리에 리터럴로 적어 둔다. Chain이 다른 값으로 계산됐다면 이 대입 자체가
+// 타입 검사에서 막히므로, 이 세 줄이 통과한다는 사실이 곧 검사 결과에 대한 증명이 된다.
+const goodPipeChain: GoodPipeChain = true;
+const brokenPipeChain: BrokenPipeChain = false;
+const upperToAverage: UpperToAverage = false;
+
+console.log("좋은 함수 사슬 타입 검사:", goodPipeChain);
+console.log("깨진 함수 사슬 타입 검사:", brokenPipeChain);
+console.log("어긋난 이웃 검사:", upperToAverage);
+
+export {};
