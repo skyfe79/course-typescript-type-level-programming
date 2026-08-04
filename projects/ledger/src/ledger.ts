@@ -506,6 +506,29 @@ if (journalResult.ok) {
   console.log(`parse failed: ${journalResult.error}`);
 }
 
+/*
+ * Command는 이펙트를 직접 일으키는 대신 이펙트를 값으로 나타낸 타입입니다.
+ * appendTransaction은 저널에 거래를 추가하라는 뜻이고, printReport는 문자열 하나를
+ * 표준출력에 찍으라는 뜻이며, exit은 주어진 종료 코드로 끝내라는 뜻입니다.
+ * 다만 이 값들은 아직 아무 일도 하지 않습니다. 실제로 실행하는 인터프리터는
+ * 다음 화에서 만듭니다.
+ *
+ * appendTransaction 갈래는 Transaction을 그대로 안고 있으므로, 지금까지 쌓아 온
+ * 도메인 타입 위에 커맨드를 그대로 얹을 수 있습니다.
+ *
+ * exit의 code는 number가 아니라 0 | 1 리터럴 유니온입니다. 그래서 종료 코드가 될 수
+ * 있는 값이 두 가지로 못 박힙니다.
+ *
+ * 같은 프로젝트의 projects/ledger/src/cli.ts에도 Command라는 타입이 따로 있지만,
+ * 그것은 명령행 표면(argv)을 나타내는 타입이고 이 파일의 Command는 이펙트를
+ * 나타내는 커맨드입니다. ledger.ts는 export {}; 때문에 모듈이므로 두 선언은
+ * 서로 충돌하지 않습니다.
+ */
+type Command =
+  | { readonly kind: "appendTransaction"; readonly transaction: Transaction }
+  | { readonly kind: "printReport"; readonly report: string }
+  | { readonly kind: "exit"; readonly code: 0 | 1 };
+
 export {};
 
 /*
