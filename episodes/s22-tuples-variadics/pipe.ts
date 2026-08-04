@@ -46,3 +46,17 @@ const shout = pipe(trim, toUpperCase);
 const shoutResult: string = shout("  hello  ");
 
 console.log("두 함수 pipe 결과:", shoutResult);
+
+// 사슬을 더 길게 만들어도 검사 방식은 같다. string을 number로 바꾸는 countWords 뒤에는
+// number를 받는 함수만 올 수 있고, 마지막 toLabel이 최종 반환 타입을 string으로 고정한다.
+const countWords = (s: string) => s.split(" ").filter(Boolean).length;
+const double = (n: number) => n * 2;
+const toLabel = (n: number) => `count: ${n}`;
+
+const run = pipe(trim, toUpperCase, countWords, double, toLabel);
+
+// run은 처음 함수 trim의 매개변수 string을 받고, 마지막 함수 toLabel의 반환값 string을 돌려준다.
+const runTypeCheck: (arg: string) => string = run;
+const runResult: string = runTypeCheck("  type level programming  ");
+
+console.log(run(process.argv[2] ?? ""));
