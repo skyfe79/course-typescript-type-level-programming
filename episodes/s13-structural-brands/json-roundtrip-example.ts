@@ -32,4 +32,15 @@ console.log(payload); // {"id":"u-42"}
 const parsedPayload = JSON.parse(payload) as { id: string };
 const restored = parseUserId(parsedPayload.id);
 
+// codeStep 200 — 브랜드 복원 확인
+console.log(greetUser(restored)); // OK
+
+// @ts-expect-error - 체크포인트를 거치지 않은 순수 string은 여전히 UserId가 아니다
+greetUser(parsedPayload.id);
+// 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+// episodes/s13-structural-brands/json-roundtrip-example.ts(38,11): error TS2345: Argument of type 'string' is not assignable to parameter of type 'UserId'.
+//   Type 'string' is not assignable to type '{ readonly [brand]: "UserId"; }'.
+
+console.log("요약 — JSON 왕복 뒤에는 재진입 체크포인트로 UserId 브랜드를 다시 붙인다.");
+
 export {};
