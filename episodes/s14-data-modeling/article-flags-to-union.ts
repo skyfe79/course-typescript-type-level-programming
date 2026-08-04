@@ -28,4 +28,18 @@ const nonsense: ArticleFlags = {
   isArchived: true,
 };
 
+// codeStep 205 — status 판별자로 세 가지 게시 상태만 표현
+
+// ArticleFlags와 draft, nonsense 값은 이전 커밋의 참고용으로만 남긴다
+type ArticleState =
+  | { status: "draft" }
+  | { status: "published"; publishedAt: string }
+  | { status: "archived"; archivedAt: string };
+
+const draftState: ArticleState = { status: "draft" };
+const publishedState: ArticleState = {
+  status: "published",
+  publishedAt: "2026-08-02",
+};
+
 export {};
