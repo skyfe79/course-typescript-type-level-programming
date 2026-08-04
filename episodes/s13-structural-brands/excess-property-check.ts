@@ -39,4 +39,12 @@ console.log("초과 필드를 선언한 타입의 변수도 Options 자리에 �
 // run({ verbose: true, extra: 1 });
 // episodes/s13-structural-brands/excess-property-check.ts(39,22): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type 'Options'.
 
+// codeStep 189 — 변수를 거치면 같은 값도 통과한다
+
+const config = { verbose: true, extra: 1 };
+
+console.log("변수를 거치면 같은 값도 통과한다:", run(config));
+
+console.log("요약 — 구조가 맞는 변수는 통과하지만, 갓 만든 객체 리터럴의 초과 필드는 프레시니스 단계에서 걸린다.");
+
 export {};
