@@ -1,0 +1,5 @@
+{
+  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정합니다.
+  // extends는 compilerOptions를 상속하므로 여기서 "types": ["node"]를 다시 적지 않아도 됩니다.
+  "extends": "../../tsconfig.json"
+}
