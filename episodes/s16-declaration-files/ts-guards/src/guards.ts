@@ -39,7 +39,7 @@ export function checkGuard(value: unknown): GuardResult {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 실측 기록 — 이 폴더 설정으로 컴파일해 확인한 것
-//   ①~⑤ verbatimModuleSyntax  ·  ⑥~⑨ declaration과 isolatedDeclarations
+//   ①~⑤ verbatimModuleSyntax  ·  ⑥~⑨ declaration과 isolatedDeclarations  ·  ⑩ 배럴과 배포
 //
 // 컴파일:    npx tsc -p episodes/s16-declaration-files/ts-guards
 // 출력 확인: cat episodes/s16-declaration-files/ts-guards/dist/guards.js
@@ -95,4 +95,15 @@ export function checkGuard(value: unknown): GuardResult {
 // ⑨ ⑦의 오류가 나는 동안에도 루트 게이트 npx tsc --noEmit은 0 오류로 통과합니다.
 //    루트 tsconfig.json에 isolatedDeclarations가 없기 때문입니다. 오류는 이 폴더의 설정으로
 //    컴파일할 때만 드러납니다.
+//
+// ⑩ 배럴 src/index.ts를 넣은 뒤 npx tsc -p episodes/s16-declaration-files/ts-guards를 돌리면
+//    dist에 여덟 파일이 나옵니다. index·guards·format·types 네 모듈마다 .js와 .d.ts가
+//    하나씩 생깁니다. 배럴을 넣기 전에는 여섯 파일이었습니다.
+//    빌드에 필요한 rootDir과 outDir은 앞에서 이미 tsconfig.json에 넣어 두었으므로, 이번에
+//    설정을 더 고칠 것은 없습니다. 같은 명령을 그대로 돌려 결과만 확인하면 됩니다.
+//    dist/index.d.ts는 소스 배럴과 글자 그대로 같습니다:
+//      export { isNonEmptyString, assertDefined, checkGuard } from "./guards.js";
+//      export type { GuardResult } from "./types.js";
+//    재수출은 isolatedDeclarations가 요구하는 어노테이션 대상이 아닙니다. 내보내는 이름의
+//    타입은 이미 guards.d.ts와 types.d.ts에 적혀 있기 때문입니다.
 // ─────────────────────────────────────────────────────────────────────────────
