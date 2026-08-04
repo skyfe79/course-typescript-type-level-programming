@@ -61,3 +61,28 @@ type RetryPolicy = {
 };
 
 const defaultRetryPolicy: RetryPolicy = { maxAttempts: 3, delayMs: 200 };
+
+// codeStep 235 — 인터프리터가 정책을 읽어 실행하게 하기
+
+function runWithRetry(
+  command: NotificationCommand,
+  policy: RetryPolicy,
+  attempt = 1,
+): void {
+  console.log(`[시도 ${attempt}/${policy.maxAttempts}]`);
+  const succeeded = attempt >= 2; // 데모용: 두 번째 시도에서 성공한다고 가정
+  if (succeeded) {
+    runCommand(command);
+    return;
+  }
+  if (attempt >= policy.maxAttempts) {
+    console.log(`[포기] ${policy.maxAttempts}번 모두 실패했습니다.`);
+    return;
+  }
+  runWithRetry(command, policy, attempt + 1);
+}
+
+runWithRetry(
+  { kind: "sendSms", to: "010-0000-0000", body: "1차 알림" },
+  defaultRetryPolicy,
+);
