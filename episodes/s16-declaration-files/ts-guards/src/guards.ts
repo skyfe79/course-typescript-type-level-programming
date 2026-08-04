@@ -14,9 +14,9 @@
 import type { GuardResult } from "./types.js";
 import { formatMessage } from "./format.js";
 
-// 타입 술어라 참이 나오면 value가 string으로 좁혀집니다.
-// 비어 있지 않다는 조건은 그 위에 얹은 런타임 검사입니다.
-export function isNonEmptyString(value: unknown): value is string {
+// 반환 타입을 따로 적지 않았습니다. 추론된 boolean이 반환 타입이 되고,
+// checkGuard는 참·거짓만 쓰므로 이 화에서는 그것으로 충분합니다.
+export function isNonEmptyString(value: unknown) {
   return typeof value === "string" && value.length > 0;
 }
 
