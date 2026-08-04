@@ -1,7 +1,12 @@
 {
   "name": "ledger",
-  "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "복식부기 저널·예산 CLI (§17 프로젝트)입니다."
+  "description": "복식부기 저널·예산 CLI (§17 프로젝트)입니다.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ledger": "dist/cli.js"
+  },
+  "files": ["dist"]
 }
