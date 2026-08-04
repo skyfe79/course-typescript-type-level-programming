@@ -529,6 +529,45 @@ type Command =
   | { readonly kind: "printReport"; readonly report: string }
   | { readonly kind: "exit"; readonly code: 0 | 1 };
 
+/*
+ * decide는 값을 받아 값을 돌려줄 뿐입니다. 함수 몸통 어디에도 fs, console,
+ * process가 없으므로 파일 시스템, 시계, 표준출력 없이 이 함수 하나만 따로
+ * 호출해 볼 수 있습니다.
+ *
+ * 두 갈래는 서로 다른 커맨드 목록을 조립합니다. 입력이 ok: false이면 실패를
+ * 알리는 printReport와 종료 코드 1의 exit 둘만 돌려줍니다. 입력이 ok: true이면
+ * 저널에 추가하는 appendTransaction, 결과를 알리는 printReport, 종료 코드 0의
+ * exit 셋을 돌려줍니다.
+ *
+ * input.ok를 먼저 확인해야 input.value를 읽을 수 있습니다. Result<T>가 판별
+ * 유니온이라 좁히기 전에는 성공 갈래의 필드에 손댈 수 없습니다.
+ *
+ * 누적 차변 합계를 구할 때 simple 갈래는 차변이 한 줄인 debit이고, split 갈래는
+ * 여러 줄인 debits입니다. 그래서 kind로 좁힌 뒤 각 갈래의 차변 줄만 모아
+ * sumMinor에 넘깁니다.
+ *
+ * 돌려주는 커맨드들은 아직 계획일 뿐이며, 실제로 아무 일도 일어나지 않습니다.
+ */
+function decide(existing: readonly Transaction[], input: Result<Transaction>): readonly Command[] {
+  if (!input.ok) {
+    return [
+      { kind: "printReport", report: `기록 실패: ${input.error}` },
+      { kind: "exit", code: 1 },
+    ];
+  }
+
+  const updated = [...existing, input.value];
+  const debitTotal = sumMinor(
+    updated.flatMap((tx) => (tx.kind === "simple" ? [tx.debit] : tx.debits)),
+  );
+
+  return [
+    { kind: "appendTransaction", transaction: input.value },
+    { kind: "printReport", report: `기록 완료. 누적 차변 합계: ${debitTotal}` },
+    { kind: "exit", code: 0 },
+  ];
+}
+
 export {};
 
 /*
