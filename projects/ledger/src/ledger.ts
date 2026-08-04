@@ -44,7 +44,8 @@ function makeAccountId(raw: string): AccountId {
  */
 type IsoDate = string;
 
-interface Money {
+declare const moneyBrand: unique symbol;
+type Money = {
   /*
    * 원 단위 정수를 저장합니다.
    *
@@ -56,11 +57,21 @@ interface Money {
    * 사실 하나를 "음수 대변"과 "양수 차변" 두 가지 방식으로 똑같이 나타낼 수
    * 있어, 실제로 필요한 상태 수보다 표현 가능한 상태 수가 두 배로 불어납니다.
    * 방향은 다음 화 이후 거래 타입에서 별도 필드 하나로만 나타냅니다.
+   *
+   * 이제 makeMoney가 이 결정을 실제 런타임 검증으로 강제합니다.
    */
   readonly amountMinor: number;
 
   // 이 실습 저장소의 ledger는 우선 원화만 다룹니다.
   readonly currency: "KRW";
+} & { readonly [moneyBrand]: true };
+
+function makeMoney(amountMinor: number, currency: "KRW"): Money {
+  if (!Number.isInteger(amountMinor) || amountMinor < 0) {
+    throw new Error(`Money.amountMinor must be a non-negative integer (received ${amountMinor})`);
+  }
+
+  return { amountMinor, currency } as Money;
 }
 
 function sameMoney(a: Money, b: Money): boolean {
@@ -72,8 +83,8 @@ function sameMoney(a: Money, b: Money): boolean {
  * 그런데도 sameMoney는 true를 돌려줍니다. 값 객체는 어디서 만들어졌는지가
  * 아니라 데이터만으로 같음을 판정하기 때문입니다.
  */
-const price1: Money = { amountMinor: 15000, currency: "KRW" };
-const price2: Money = { amountMinor: 15000, currency: "KRW" };
+const price1: Money = makeMoney(15000, "KRW");
+const price2: Money = makeMoney(15000, "KRW");
 
 console.log(sameMoney(price1, price2));
 
@@ -118,7 +129,7 @@ const checkingBefore: Account = {
   id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
-  balance: { amountMinor: 500000, currency: "KRW" },
+  balance: makeMoney(500000, "KRW"),
 };
 
 const checkingAfter: Account = {
@@ -126,7 +137,7 @@ const checkingAfter: Account = {
   id: makeAccountId("acct-checking"),
   name: "체크카드",
   kind: "asset",
-  balance: { amountMinor: 485000, currency: "KRW" },
+  balance: makeMoney(485000, "KRW"),
 };
 
 console.log(sameAccount(checkingBefore, checkingAfter));
@@ -142,6 +153,12 @@ console.log(describeAccountId(checkingId));
 // @ts-expect-error - 순수 string은 AccountId 브랜드가 없어 바로 넘길 수 없다
 describeAccountId("acct-checking");
 
+const lunchPrice = makeMoney(15000, "KRW");
+console.log(lunchPrice.amountMinor, lunchPrice.currency);
+
+// @ts-expect-error - 브랜드 없는 평범한 객체 리터럴은 Money 자리에 들어갈 수 없다
+const rawPrice: Money = { amountMinor: 15000, currency: "KRW" };
+
 export {};
 
 /*
@@ -154,13 +171,15 @@ export {};
  * true
  * false
  * 계좌 acct-checking
+ * 15000 KRW
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
  * 둘째 줄과 셋째 줄은 같은 계좌의 두 시점을 놓고
  * sameAccount는 true, 그 잔액끼리의 sameMoney는 false를 돌려줍니다.
  * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다. 넷째 줄은
- * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다.
+ * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다. 다섯째 줄은
+ * 검증된 Money도 일반 객체처럼 필드를 읽어 출력할 수 있음을 보여줍니다.
  *
  * $ npx tsc -p .
  * 출력 없음
