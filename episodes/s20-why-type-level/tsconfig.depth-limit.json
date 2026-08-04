@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["instantiation-depth-limit.ts"],
+  "exclude": []
+}
