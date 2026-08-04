@@ -65,6 +65,59 @@ const price2: Money = { amountMinor: 15000, currency: "KRW" };
 
 console.log(sameMoney(price1, price2));
 
+/*
+ * 여기부터는 엔티티입니다.
+ *
+ * 엔티티는 값 객체와 다르게 식별자가 정체성을 정합니다. 이름이나 잔액처럼
+ * 시간이 지나며 바뀌는 데이터가 있어도, id가 같으면 같은 계좌로 봅니다.
+ */
+
+type AccountKind = "asset" | "expense" | "budget";
+
+interface Account {
+  // 식별자입니다. 계좌의 정체성은 이 값 하나로만 정해집니다.
+  readonly id: AccountId;
+
+  // 이름은 사용자가 나중에 바꿀 수 있는 표시용 상태입니다.
+  name: string;
+
+  // 계좌의 분류도 도메인 정책에 따라 바뀔 수 있는 상태입니다.
+  kind: AccountKind;
+
+  // 잔액은 입출금과 거래 기록에 따라 시간이 지나며 바뀌는 상태입니다.
+  balance: Money;
+}
+
+function sameAccount(a: Account, b: Account): boolean {
+  // 정체성 비교입니다. name, kind, balance는 일부러 보지 않습니다.
+  return a.id === b.id;
+}
+
+/*
+ * 같은 계좌의 두 시점입니다. 잔액만 다릅니다.
+ *
+ * sameAccount는 true, 두 잔액을 sameMoney로 비교하면 false가 나옵니다.
+ * 두 함수가 서로 다른 질문에 답하기 때문입니다.
+ *   sameAccount — 이 둘은 같은 계좌인가
+ *   sameMoney   — 이 둘은 같은 금액인가
+ */
+const checkingBefore: Account = {
+  id: "acct-checking",
+  name: "체크카드",
+  kind: "asset",
+  balance: { amountMinor: 500000, currency: "KRW" },
+};
+
+const checkingAfter: Account = {
+  id: "acct-checking",
+  name: "체크카드",
+  kind: "asset",
+  balance: { amountMinor: 485000, currency: "KRW" },
+};
+
+console.log(sameAccount(checkingBefore, checkingAfter));
+console.log(sameMoney(checkingBefore.balance, checkingAfter.balance));
+
 export {};
 
 /*
@@ -74,10 +127,22 @@ export {};
  *
  * $ node src/ledger.ts
  * true
+ * true
+ * false
  * 종료 코드: 0
+ *
+ * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
+ * 둘째 줄과 셋째 줄이 이 화의 결론입니다. 같은 계좌의 두 시점을 놓고
+ * sameAccount는 true, 그 잔액끼리의 sameMoney는 false를 돌려줍니다.
+ * 정체성이 같다는 것과 값이 같다는 것은 서로 다른 질문입니다.
  *
  * $ npx tsc -p .
  * 출력 없음
+ * 종료 코드: 0
+ *
+ * $ node src/cli.ts add 100 groceries
+ * add 명령은 아직 구현되지 않았습니다.
+ * 인자: 100, groceries
  * 종료 코드: 0
  *
  * 실행 위치: 저장소 루트
