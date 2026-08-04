@@ -9,6 +9,10 @@ type ParsedOrder = {
   orderId: string;
   quantity: number;
   unitPriceCents: number;
+  // codeStep 213 — 필드 추가 방식 선택하고 적용
+  // giftMessage는 있어도 없어도 기존 로직에 영향을 주지 않는 부가 정보라
+  // 버전 있는 레코드가 아니라 선택적 필드로 추가합니다.
+  giftMessage?: string;
 };
 
 function calculateTotalCents(order: ParsedOrder): number {
