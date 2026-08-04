@@ -21,4 +21,23 @@ const reversedColors: ColorsReversed = ["yellow", "blue", "green", "red"];
 
 console.log("뒤집힌 색상:", reversedColors);
 
+// 원소 값 대신 자리표시자 0 하나를 누산기에 쌓으면, 다 소비했을 때 누산기의 길이가 곧 개수다.
+// Reverse가 머리를 누산기 앞에 놓았다면, 여기서는 머리의 값을 버리고 0만 누산기 뒤에 붙인다.
+// 재귀가 끝나는 자리에서 누산기 자체가 아니라 그 length를 읽는 것이 이 타입의 마지막 한 걸음이다.
+type Length<T extends readonly unknown[], Acc extends readonly 0[] = []> =
+  T extends readonly [infer _Head, ...infer Tail]
+    ? Length<Tail extends readonly unknown[] ? Tail : never, [...Acc, 0]>
+    : Acc["length"];
+
+type ColorsLength = Length<typeof colors>;
+
+// 결과는 넓은 number가 아니라 리터럴 타입 4다.
+// 이 대입이 통과한다는 사실이 Length가 색상 튜플의 길이를 정확히 세었다는 증거다.
+const colorsLength: ColorsLength = 4;
+
+// 이 저장소가 이미 쓰고 있는 Repeat나 NestArr도 Acc["length"]를 본다. 다만 방향이 반대다.
+// 그쪽은 목표 개수 N을 받아 그만큼 만들 때까지 쌓고, 여기는 주어진 튜플이 빌 때까지 쌓은 뒤
+// 그 길이를 답으로 읽는다. 같은 도구를 반대로 쥐면 만드는 일이 세는 일이 된다.
+console.log("색상 개수:", colorsLength);
+
 export {};
