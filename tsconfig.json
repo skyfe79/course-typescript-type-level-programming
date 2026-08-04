@@ -3,6 +3,13 @@
     "strict": true,
     "types": ["node"],
     "erasableSyntaxOnly": true,
-    "noEmit": true
+    "noEmit": true,
+    // .ts 확장자를 그대로 적은 import를 허용합니다. node가 타입 스트리핑으로 파일을 그대로
+    // 실행하므로, 이 저장소의 상대 import는 확장자를 생략할 수 없습니다.
+    "allowImportingTsExtensions": true,
+    // 위 옵션은 자바스크립트를 내보내는 프로젝트에서는 단독으로 켤 수 없습니다
+    // (error TS5096). 이 옵션이 함께 켜져 있으면 컴파일할 때 상대 import의 .ts가 .js로
+    // 바뀌므로, dist를 내보내는 episodes/s16-declaration-files/ts-guards도 그대로 통과합니다.
+    "rewriteRelativeImportExtensions": true
   }
 }
