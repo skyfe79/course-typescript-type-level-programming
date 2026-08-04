@@ -21,6 +21,8 @@
  * 이번 화는 그 둘을 나눠 선언합니다. 값 객체를 먼저 만들고, 엔티티를 그 위에 얹습니다.
  * 이제 AccountId, Money, IsoDate 세 값 타입은 모두 스마트 생성자를 거쳐야만
  * 만들어지며, 각 생성자가 자기 값에 맞는 런타임 검증을 맡습니다.
+ * 여기에 거래의 두 모양도 판별 유니온으로 더합니다. 단순 거래와 분할 거래가
+ * 어떤 필드를 가져야 하는지 타입 선언만으로 먼저 고정합니다.
  */
 
 /*
@@ -42,8 +44,8 @@ function makeAccountId(raw: string): AccountId {
  * IsoDate는 문자열처럼 출력하고 저장할 수 있지만, YYYY-MM-DD 형식을 확인한
  * 문자열만 날짜 값으로 다루도록 브랜드를 붙입니다.
  *
- * 실제 사용은 다음 화 이후 거래 타입을 만들 때 시작합니다. 지금은 생성자가
- * 어떤 문자열을 통과시키고 거부하는지 확인하는 데 집중합니다.
+ * 이제 Transaction의 date 필드가 이 타입을 실제 날짜 값으로 사용합니다.
+ * 생성자는 어떤 문자열을 통과시키고 거부하는지 런타임에서 계속 보여줍니다.
  */
 declare const isoDateBrand: unique symbol;
 type IsoDate = string & { readonly [isoDateBrand]: true };
@@ -76,7 +78,7 @@ type Money = {
    * amountMinor는 항상 0 이상입니다. 금액에 음수를 허용하면 같은 경제적
    * 사실 하나를 "음수 대변"과 "양수 차변" 두 가지 방식으로 똑같이 나타낼 수
    * 있어, 실제로 필요한 상태 수보다 표현 가능한 상태 수가 두 배로 불어납니다.
-   * 방향은 다음 화 이후 거래 타입에서 별도 필드 하나로만 나타냅니다.
+   * 방향은 EntryLine.side 필드 하나로만 나타냅니다.
    *
    * 이제 makeMoney가 이 결정을 실제 런타임 검증으로 강제합니다.
    */
@@ -187,6 +189,44 @@ try {
 } catch (err) {
   console.log((err as Error).message);
 }
+
+/*
+ * 여기부터는 거래입니다.
+ *
+ * 저널 한 줄은 어느 계좌에서 얼마가 어느 방향으로 움직였는지를 나타냅니다.
+ * 금액은 항상 0 이상이므로(Money 주석 참고) 방향은 side 필드가 따로 맡습니다.
+ */
+type EntryLine = {
+  readonly accountId: AccountId;
+  readonly amount: Money;
+  readonly side: "debit" | "credit";
+};
+
+/*
+ * 거래는 두 모양뿐입니다. 한 줄씩 맞바꾸는 단순 거래와, 여러 줄로 나뉜 분할
+ * 거래입니다. 두 모양을 kind 판별자로 구분하고, 각 갈래에 이름을 붙여 둡니다.
+ * 갈래에 이름이 있으면 다음 절의 생성자가 자기 갈래 타입을 그대로 돌려줄 수
+ * 있고, 호출 쪽은 유니온 좁히기 없이 그 갈래 전용 필드를 바로 읽습니다.
+ */
+type SimpleTransaction = {
+  readonly kind: "simple";
+  readonly id: string;
+  readonly date: IsoDate;
+  readonly memo: string;
+  readonly debit: EntryLine;
+  readonly credit: EntryLine;
+};
+
+type SplitTransaction = {
+  readonly kind: "split";
+  readonly id: string;
+  readonly date: IsoDate;
+  readonly memo: string;
+  readonly debits: readonly EntryLine[];
+  readonly credits: readonly EntryLine[];
+};
+
+type Transaction = SimpleTransaction | SplitTransaction;
 
 export {};
 
