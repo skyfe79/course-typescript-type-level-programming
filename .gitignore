@@ -72,6 +72,8 @@ web_modules/
 # 강의 실습용 환경 변수 픽스처 (envcheck)
 !projects/envcheck/.env.valid
 !projects/envcheck/.env.broken
+# 강의 실습용 환경 변수 픽스처 (§16 전역 선언)
+!episodes/s16-declaration-files/.env.dev
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
