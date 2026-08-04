@@ -1,0 +1,15 @@
+{
+  // 루트의 strict, types, erasableSyntaxOnly 설정을 그대로 물려받습니다.
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    // 타입 전용 임포트가 소스에 import type으로 적혀 있어야 함을 강제합니다.
+    "verbatimModuleSyntax": true,
+    // 루트는 noEmit: true라 타입 검사만 하므로, 이 폴더에서만 자바스크립트 출력을 켭니다.
+    "noEmit": false,
+    // rootDir이 없으면 타입스크립트 7이 출력 경로를 정하지 못해 error TS5011로 멈춥니다.
+    "rootDir": "src",
+    // 컴파일된 자바스크립트를 직접 열어 보기 위해 dist 폴더로 내보냅니다.
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}
