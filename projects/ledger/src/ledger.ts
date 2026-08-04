@@ -254,7 +254,7 @@ function makeSimpleTransaction(
 }
 
 // 분할 거래는 두 쪽의 합계를 sumMinor로 구해 비교합니다.
-// 실제 split 값은 다음 절에서 만들어 쓰고, 여기서는 생성자만 선언해 둡니다.
+// 아래에서는 실제 split 값도 이 생성자로 만들어 단순 거래와 같은 방식으로 설명합니다.
 function makeSplitTransaction(
   id: string,
   date: IsoDate,
@@ -294,6 +294,39 @@ try {
   console.log((err as Error).message);
 }
 
+function describeTransaction(tx: Transaction): string {
+  switch (tx.kind) {
+    case "simple":
+      return `${tx.date} ${tx.memo}: ${tx.debit.accountId} ← ${tx.credit.accountId} (${tx.debit.amount.amountMinor})`;
+    case "split":
+      return `${tx.date} ${tx.memo}: 분할 거래 (차변 ${tx.debits.length}줄, 대변 ${tx.credits.length}줄)`;
+    default: {
+      /*
+       * tx를 never에 대입하는 이 줄이 통과한다는 사실 자체가, 이 시점에
+       * simple과 split 두 갈래가 전부 처리됐다는 컴파일러의 증명입니다.
+       * 나중에 Transaction에 세 번째 갈래가 추가되는데 이 switch에 그 case를
+       * 잊으면 tx가 더는 never로 좁혀지지 않아 바로 이 줄에서 컴파일이 막힙니다.
+       */
+      const _exhaustive: never = tx;
+      return _exhaustive;
+    }
+  }
+}
+
+const groceries = makeSplitTransaction(
+  "tx-2",
+  makeIsoDate("2026-08-02"),
+  "장보기",
+  [
+    { accountId: makeAccountId("acct-food"), amount: makeMoney(30000, "KRW"), side: "debit" },
+    { accountId: makeAccountId("acct-supplies"), amount: makeMoney(12000, "KRW"), side: "debit" },
+  ],
+  [{ accountId: makeAccountId("acct-checking"), amount: makeMoney(42000, "KRW"), side: "credit" }],
+);
+
+console.log(describeTransaction(lunch));
+console.log(describeTransaction(groceries));
+
 export {};
 
 /*
@@ -311,6 +344,8 @@ export {};
  * IsoDate must match YYYY-MM-DD (received "08/02/2026")
  * simple 15000
  * Unbalanced transaction tx-bad: debit 15000 != credit 12000
+ * 2026-08-01 점심: acct-food ← acct-checking (15000)
+ * 2026-08-02 장보기: 분할 거래 (차변 2줄, 대변 1줄)
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -323,7 +358,10 @@ export {};
  * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다. 여덟째 줄은
  * 균형이 맞는 단순 거래가 생성되어 simple 갈래와 금액을 바로 읽을 수 있음을 보여줍니다.
  * 아홉째 줄은 tx-bad가 생성자 안의 균형 검사를 통과하지 못해 값으로 만들어지지 않았음을
- * try/catch로 확인한 오류 메시지입니다.
+ * try/catch로 확인한 오류 메시지입니다. 열째 줄은 simple 갈래가 describeTransaction의
+ * "simple" case를 통과해 날짜, 메모, 차변/대변 계좌, 금액으로 설명되는 모습입니다.
+ * 열한째 줄은 makeSplitTransaction으로 만든 균형 잡힌 split 갈래가 분할 거래 설명으로
+ * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
  *
  * $ npx tsc -p .
  * 출력 없음
