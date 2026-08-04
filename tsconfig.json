@@ -17,6 +17,7 @@
   // 따로 검사합니다. 기본값을 덮어쓰는 자리이므로 node_modules를 다시 적어 둡니다.
   "exclude": [
     "node_modules",
-    "episodes/s20-why-type-level/instantiation-depth-limit.ts"
+    "episodes/s20-why-type-level/instantiation-depth-limit.ts",
+    "episodes/s21-conditional-types-infer/recursion-lab.ts"
   ]
 }
