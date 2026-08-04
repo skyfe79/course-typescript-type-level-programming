@@ -35,4 +35,25 @@ console.log(
   decideNotification({ kind: "pickup", storeLocation: "강남점" }),
 );
 
+// codeStep 223 — 코어와 셸 사이 인터페이스로 쓰기
+
+function sendNotification(command: NotificationCommand): void {
+  switch (command.kind) {
+    case "sendEmail":
+      console.log(
+        `[이메일] ${command.to} / ${command.subject}: ${command.body}`,
+      );
+      break;
+    case "sendSms":
+      console.log(`[SMS] ${command.to}: ${command.body}`);
+      break;
+  }
+}
+
+const command = decideNotification({
+  kind: "delivery",
+  deliveryAddress: "서울시 마포구 …",
+});
+sendNotification(command);
+
 export {};
