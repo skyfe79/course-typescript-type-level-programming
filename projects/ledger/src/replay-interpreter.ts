@@ -68,12 +68,26 @@ function saveRunLog(path: string, log: RunLog): void {
   });
 }
 
+function isRunLog(value: unknown): value is RunLog {
+  if (value === null || typeof value !== "object") return false;
+
+  const candidate = value as { readonly argv?: unknown; readonly entries?: unknown };
+  return Array.isArray(candidate.argv) && Array.isArray(candidate.entries);
+}
+
 /*
  * 로그 적재도 readJournal 커맨드로 표현합니다. 이 파일이 node:fs를 직접 부르면
  * 파일 시스템 경계가 둘로 갈라지므로, 기존 인터프리터 문을 그대로 통과합니다.
  */
 function loadRunLog(path: string): RunLog {
-  return JSON.parse(runCommand({ kind: "readJournal", path }) as string) as RunLog;
+  const parsed = JSON.parse(runCommand({ kind: "readJournal", path }) as string) as unknown;
+
+  // 로그 파일이 없으면 readJournal의 빈 저널 규칙 때문에 "[]"가 오므로 여기서 분명히 멈춥니다.
+  if (!isRunLog(parsed)) {
+    throw new Error(`실행 로그를 찾지 못했습니다. 먼저 node src/cli.ts add ... --record 명령으로 ${path} 파일을 만드십시오.`);
+  }
+
+  return parsed;
 }
 
 /*
@@ -134,6 +148,23 @@ export { loadRunLog, makeReplayInterpreter, recordCommand, saveRunLog };
  * 종료 코드: 0
  *
  * 이 파일은 최상위 실행문이 없으므로 직접 실행해도 아무것도 출력하지 않습니다.
+ * loadRunLog 안전장치는 run-log.json을 잠시 run-log.json.step278-moved로 옮긴 뒤
+ * verify-replay.ts를 실행해 확인했습니다.
+ *
+ * $ node src/verify-replay.ts
+ * file://<저장소>/projects/ledger/src/replay-interpreter.ts:87
+ *     throw new Error(`실행 로그를 찾지 못했습니다. 먼저 node src/cli.ts add ... --record 명령으로 ${path} 파일을 만드십시오.`);
+ *           ^
+ *
+ * Error: 실행 로그를 찾지 못했습니다. 먼저 node src/cli.ts add ... --record 명령으로 run-log.json 파일을 만드십시오.
+ *     at loadRunLog (file://<저장소>/projects/ledger/src/replay-interpreter.ts:87:11)
+ *     at file://<저장소>/projects/ledger/src/verify-replay.ts:70:13
+ *     at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+ *     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:639:26)
+ *     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+ *
+ * Node.js v25.8.0
+ * 종료 코드: 1
  *
  * $ npx tsc -p .
  * 출력 없음

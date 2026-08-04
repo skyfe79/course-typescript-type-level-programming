@@ -216,22 +216,133 @@ function main(command: Command, argv: readonly string[]): void {
 }
 
 const argv = process.argv.slice(2);
-main(parseCommand(argv), argv);
+
+/*
+ * 직접 실행하면 CLI로 동작하고, 다른 파일이 import하면 조용한 모듈로 남습니다.
+ * verify-replay.ts는 이 성질 덕분에 runAdd만 가져와 같은 코어 경로를 다시 돕니다.
+ */
+if (import.meta.main) {
+  main(parseCommand(argv), argv);
+}
+
+export type { Command };
+export { JOURNAL_PATH, RUN_LOG_PATH, parseCommand, runAdd, takeFlags };
 
 /*
  * 실측 기록
  *
  * 실행 위치: projects/ledger
  *
- * 거래 두 개가 들어 있는 journal.json에서 시작했습니다. 검증 전에 파일을 복사해 두고,
- * 아래 확인을 끝낸 뒤 원래 내용으로 되돌렸습니다.
+ * 거래 세 개가 들어 있는 journal.json과 직전 단계의 run-log.json에서 시작했습니다.
+ * 검증 전에 파일을 복사해 두고, 아래 확인을 끝낸 뒤 원래 내용으로 되돌렸습니다.
  *
- * $ shasum -a 256 journal.json
- * ecaee8e1653fe2821fa99b8f65c5755523c5e5214743db7a54ae5f7f07366b1d  journal.json
+ * $ shasum -a 256 journal.json run-log.json
+ * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
+ * c7e81100268fd2610715fd78de670bd9e75b3b1dd1e6633241976c63437d05fa  run-log.json
  *
  * $ npx tsc -p .
  * 출력 없음
  * 종료 코드: 0
+ *
+ * 이번 변경에서는 cli.ts를 다른 파일이 import해도 바로 실행되지 않게 했습니다.
+ * 직접 실행하는 CLI 동작은 그대로인지 아래 세 명령으로 확인했습니다.
+ *
+ * $ node src/cli.ts add 100 식비 --dry-run
+ * [드라이런] journal.json에 쓸 내용:
+ * [
+ *   {
+ *     "kind": "simple",
+ *     "id": "tx-2026-08-04-1",
+ *     "date": "2026-08-04",
+ *     "memo": "점심",
+ *     "debit": {
+ *       "accountId": "acct-food",
+ *       "amountMinor": 15000,
+ *       "currency": "KRW",
+ *       "side": "debit"
+ *     },
+ *     "credit": {
+ *       "accountId": "acct-checking",
+ *       "amountMinor": 15000,
+ *       "currency": "KRW",
+ *       "side": "credit"
+ *     }
+ *   },
+ *   {
+ *     "kind": "simple",
+ *     "id": "tx-2026-08-04-2",
+ *     "date": "2026-08-04",
+ *     "memo": "점심",
+ *     "debit": {
+ *       "accountId": "acct-food",
+ *       "amountMinor": 15000,
+ *       "currency": "KRW",
+ *       "side": "debit"
+ *     },
+ *     "credit": {
+ *       "accountId": "acct-checking",
+ *       "amountMinor": 15000,
+ *       "currency": "KRW",
+ *       "side": "credit"
+ *     }
+ *   },
+ *   {
+ *     "kind": "simple",
+ *     "id": "tx-2026-08-04-3",
+ *     "date": "2026-08-04",
+ *     "memo": "커피",
+ *     "debit": {
+ *       "accountId": "acct-food",
+ *       "amountMinor": 5000,
+ *       "currency": "KRW",
+ *       "side": "debit"
+ *     },
+ *     "credit": {
+ *       "accountId": "acct-checking",
+ *       "amountMinor": 5000,
+ *       "currency": "KRW",
+ *       "side": "credit"
+ *     }
+ *   },
+ *   {
+ *     "kind": "simple",
+ *     "id": "tx-2026-08-04-4",
+ *     "date": "2026-08-04",
+ *     "memo": "식비",
+ *     "debit": {
+ *       "accountId": "acct-food",
+ *       "amountMinor": 100,
+ *       "currency": "KRW",
+ *       "side": "debit"
+ *     },
+ *     "credit": {
+ *       "accountId": "acct-checking",
+ *       "amountMinor": 100,
+ *       "currency": "KRW",
+ *       "side": "credit"
+ *     }
+ *   }
+ * ]
+ *
+ * [드라이런] 출력할 내용: 기록 완료. 누적 차변 합계: 35100
+ * 종료 코드: 0
+ *
+ * $ node src/cli.ts add 100 식비
+ * 기록 완료. 누적 차변 합계: 35100
+ * 종료 코드: 0
+ *
+ * $ node -e 'const j=require("./journal.json"); console.log(j.length); console.log(j.at(-1).memo); console.log(j.at(-1).debit.amountMinor);'
+ * 4
+ * 식비
+ * 100
+ *
+ * $ node src/cli.ts report
+ * report 명령은 아직 구현되지 않았습니다.
+ * 인자:
+ * 종료 코드: 0
+ *
+ * 위 확인 뒤 journal.json을 원래 내용으로 되돌렸습니다. 아래 --record 묶음은
+ * 직전 단계에서 run-log.json을 만들 때 남긴 실측 기록입니다.
  *
  * --record는 실제 실행을 기록하므로 journal.json에 거래가 하나 늘고,
  * run-log.json에는 실행 커맨드와 읽기 결과가 남습니다.
