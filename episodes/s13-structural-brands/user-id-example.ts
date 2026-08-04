@@ -18,4 +18,14 @@ function greetUser(id: UserId): string {
   return `Hello, user ${id}`;
 }
 
+// codeStep 195 — 순수 string 전달 시 에러 확인
+
+const rawId: string = "u-42";
+
+// @ts-expect-error - 순수 string은 UserId 브랜드가 없어 greetUser에 전달할 수 없다
+greetUser(rawId);
+// 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+// episodes/s13-structural-brands/user-id-example.ts(25,11): error TS2345: Argument of type 'string' is not assignable to parameter of type 'UserId'.
+//   Type 'string' is not assignable to type '{ readonly [brand]: "UserId"; }'.
+
 export {};
