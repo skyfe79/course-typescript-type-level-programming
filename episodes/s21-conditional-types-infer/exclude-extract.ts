@@ -21,4 +21,22 @@ acceptNoApple("banana");
 // 주석을 풀면 error TS2345: Argument of type '"apple"' is not assignable to parameter of type 'NoApple'. 오류가 난다.
 // acceptNoApple("apple"); // 컴파일 오류 — "apple"은 NoApple에서 이미 걸러졌다
 
+// MyExtract<T, U>는 MyExclude와 조건문의 참·거짓 분기만 뒤바뀐 형태다.
+// 조건에 맞는 멤버는 T로 보존하고, 맞지 않는 멤버는 never로 지워 필요한 멤버만 모은다.
+type MyExtract<T, U> = T extends U ? T : never;
+
+// 같은 Fruit 유니온에서 두 멤버를 뽑으면 분산된 각 검사 결과가 다시 유니온으로 합쳐진다.
+// "cherry"는 never가 되어 사라지고 "apple"과 "banana"만 남는다.
+type AppleOrBanana = MyExtract<Fruit, "apple" | "banana">;   // "apple" | "banana"
+
+// 함수 매개변수에 AppleOrBanana를 쓰면 추출되지 않은 멤버가 호출 단계에서 막히는지 볼 수 있다.
+// 이 값도 타입 검사를 통과한 뒤에만 런타임 출력으로 이어진다.
+function acceptAppleOrBanana(value: AppleOrBanana): void {
+  console.log(`허용: ${value}`);
+}
+
+acceptAppleOrBanana("apple");
+// 주석을 풀면 error TS2345: Argument of type '"cherry"' is not assignable to parameter of type 'AppleOrBanana'. 오류가 난다.
+// acceptAppleOrBanana("cherry"); // 컴파일 오류 — "cherry"는 AppleOrBanana에 남지 않았다
+
 export {};
