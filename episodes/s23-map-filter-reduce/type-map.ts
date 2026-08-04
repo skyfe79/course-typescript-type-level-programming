@@ -69,4 +69,21 @@ const boxedExact: [Boxed<1>, Boxed<"two">, Boxed<true>] = boxedProof;
 
 console.log("BoxedRow:", boxedExact);
 
+// 두 번째 변환 규칙은 각 원소 타입에 null을 더한다.
+// MapT의 재귀 정의는 한 글자도 고치지 않고 F 자리에 다른 타입 함수를 끼우기만 한다.
+type Nullable<T> = T | null;
+interface NullableF extends TypeFn {
+  readonly out: Nullable<this["arg"]>;
+}
+
+type NullableRow = MapT<typeof row, NullableF>;
+
+// 세 원소가 각각 자기 리터럴과 null의 합집합이 되었다.
+// 두 번째 자리에 1을 넣으면 막히므로, 이 대입은 자리마다 다른 타입이 계산되었다는 증거이기도 하다.
+const nullableProof: NullableRow = [1, null, true];
+const nullableExact: [1 | null, "two" | null, true | null] = nullableProof;
+
+// BoxedRow는 위에서 그대로 유효하게 남아 있다. 하나의 재귀가 두 F를 모두 받아 냈다.
+console.log("NullableRow:", nullableExact);
+
 export {};
