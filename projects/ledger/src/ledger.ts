@@ -327,6 +327,64 @@ const groceries = makeSplitTransaction(
 console.log(describeTransaction(lunch));
 console.log(describeTransaction(groceries));
 
+/*
+ * 여기부터는 JSON 저널 파일에서 읽어 온 원시 값을 도메인 값으로 파싱하는 구역입니다.
+ *
+ * 지금까지의 거래 값은 코드 안에서 직접 조립했습니다. 실제 ledger는 JSON 저널 파일을
+ * 읽어 시작하므로, 원시 JSON을 한 번 검증한 뒤 다시 신뢰하는 방식으로 넘기지 않습니다.
+ * 파싱 자체가 바로 AccountId, Money, EntryLine 같은 도메인 타입 조립으로 이어지게 둡니다.
+ */
+
+/*
+ * 실패를 예외가 아니라 값으로 나타냅니다. ok 판별자로 성공과 실패가 갈라지므로,
+ * 호출 쪽은 ok를 확인한 뒤에야 성공 갈래의 value를 읽을 수 있습니다.
+ */
+type Result<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: string };
+
+/*
+ * 파일에서 갓 읽은 값은 아직 어떤 필드도 보장되지 않습니다. 그래서 모든 필드를
+ * 선택적 unknown으로 둡니다. 이 느슨한 모양 자체가 아직 파싱되지 않았다는 표시입니다.
+ */
+type RawEntryLine = {
+  accountId?: unknown;
+  amountMinor?: unknown;
+  currency?: unknown;
+  side?: unknown;
+};
+
+/*
+ * 네 필드의 형태를 먼저 전부 확인합니다. 검사를 통과한 값만 makeAccountId와 makeMoney에
+ * 넘겨 EntryLine을 조립하므로, "검증했으니 이제 믿어도 된다"는 별도의 재신뢰 지점이
+ * 생기지 않습니다.
+ */
+function parseEntryLine(raw: RawEntryLine): Result<EntryLine> {
+  if (
+    typeof raw.accountId !== "string" ||
+    typeof raw.amountMinor !== "number" ||
+    raw.currency !== "KRW" ||
+    (raw.side !== "debit" && raw.side !== "credit")
+  ) {
+    return { ok: false, error: `invalid entry line: ${JSON.stringify(raw)}` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      accountId: makeAccountId(raw.accountId),
+      amount: makeMoney(raw.amountMinor, raw.currency),
+      side: raw.side,
+    },
+  };
+}
+
+/*
+ * 형태가 맞는 값은 ok: true 결과로, amountMinor가 빠진 값은 ok: false 결과로 갈립니다.
+ */
+console.log(parseEntryLine({ accountId: "acct-food", amountMinor: 15000, currency: "KRW", side: "debit" }));
+console.log(parseEntryLine({ accountId: "acct-food", currency: "KRW", side: "debit" }));
+
 export {};
 
 /*
@@ -346,6 +404,18 @@ export {};
  * Unbalanced transaction tx-bad: debit 15000 != credit 12000
  * 2026-08-01 점심: acct-food ← acct-checking (15000)
  * 2026-08-02 장보기: 분할 거래 (차변 2줄, 대변 1줄)
+ * {
+ *   ok: true,
+ *   value: {
+ *     accountId: 'acct-food',
+ *     amount: { amountMinor: 15000, currency: 'KRW' },
+ *     side: 'debit'
+ *   }
+ * }
+ * {
+ *   ok: false,
+ *   error: 'invalid entry line: {"accountId":"acct-food","currency":"KRW","side":"debit"}'
+ * }
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -362,6 +432,8 @@ export {};
  * "simple" case를 통과해 날짜, 메모, 차변/대변 계좌, 금액으로 설명되는 모습입니다.
  * 열한째 줄은 makeSplitTransaction으로 만든 균형 잡힌 split 갈래가 분할 거래 설명으로
  * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
+ * 이어지는 두 객체 출력은 parseEntryLine의 결과입니다. 필드가 모두 맞는 원시 값은 ok: true로
+ * EntryLine까지 조립되고, amountMinor가 빠진 원시 값은 ok: false와 오류 문자열로 남습니다.
  *
  * $ npx tsc -p .
  * 출력 없음
