@@ -58,4 +58,17 @@ function formatReceiptLine(order: ParsedOrder): string {
   return `${order.orderId} x${order.quantity} = ${calculateTotalCents(order)}c`;
 }
 
+// codeStep 210 — 재검증이 한 번도 없다는 것을 확인
+
+const rawPayload: RawInput = { orderId: "o-1", quantity: 3, unitPriceCents: 1200 };
+
+// @ts-expect-error - RawInput은 ParsedOrder가 아니라 파싱 없이는 넘길 수 없다
+calculateTotalCents(rawPayload);
+
+const parsed = parseOrder(rawPayload);
+if (parsed.ok) {
+  console.log(formatReceiptLine(parsed.value));
+  console.log(applyDiscount(parsed.value, 10));
+}
+
 export {};
