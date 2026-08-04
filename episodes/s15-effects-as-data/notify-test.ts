@@ -14,3 +14,29 @@ type NotificationCommand =
   | { kind: "sendEmail"; to: string; subject: string; body: string }
   | { kind: "sendSms"; to: string; body: string }
   | { kind: "log"; message: string };
+
+// codeStep 225 — 순수 결정 함수 작성하기
+
+function decideNotification(order: OrderStatus): NotificationCommand {
+  switch (order.kind) {
+    case "pickup":
+      return {
+        kind: "sendEmail",
+        to: order.storeLocation,
+        subject: "픽업 준비 완료",
+        body: `${order.storeLocation}에서 주문을 픽업할 수 있습니다.`,
+      };
+    case "delivery":
+      return {
+        kind: "sendSms",
+        to: order.deliveryAddress,
+        body: "배송이 출발했습니다.",
+      };
+    case "delayed":
+      return { kind: "log", message: `지연 사유: ${order.reason}` };
+    default: {
+      const _exhaustive: never = order;
+      throw new Error("다루지 않은 kind");
+    }
+  }
+}
