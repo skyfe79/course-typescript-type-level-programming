@@ -22,8 +22,9 @@
  *      파일 쓰기와 화면 출력 같은 이펙트는 도메인 안에서 바로 실행하지 않고,
  *      커맨드라는 값으로 미뤘다가 인터프리터 계층 하나에서만 실행합니다.
  *
- * 이번 화에서는 add 명령을 순수 코어와 인터프리터에 연결해 보장 3의 실제 경계를
- * 만듭니다. report와 budget은 아직 표면 명령만 남겨 두고 다음 화들에서 채웁니다.
+ * 이번 화에서는 report 명령도 같은 인터프리터 경계에 연결합니다. add는 파일 쓰기까지
+ * 지나가지만, report는 저널을 읽어 순수 포매터가 만든 문자열을 출력 커맨드로 넘깁니다.
+ * budget은 아직 표면 명령만 남겨 두고 다음 화들에서 채웁니다.
  */
 
 import { decide, parseJournal, parseTransaction } from "./ledger.ts";
@@ -31,6 +32,7 @@ import type { Command as CoreCommand, RawTransaction } from "./ledger.ts";
 import { runCommandDryRun } from "./dry-run-interpreter.ts";
 import { runCommand } from "./interpreter.ts";
 import type { Interpreter } from "./interpreter.ts";
+import { formatReport } from "./report.ts";
 import { loadRunLog, makeReplayInterpreter, recordCommand, saveRunLog } from "./replay-interpreter.ts";
 import type { LogEntry } from "./replay-interpreter.ts";
 
@@ -145,6 +147,29 @@ function runAdd(args: readonly string[], run: Interpreter): void {
 }
 
 /*
+ * report도 add와 같은 저널 읽기 경로를 지납니다. 차이는 새 거래를 만들거나 시계를
+ * 읽지 않는다는 점입니다. JSON 저널을 parseJournal로 검증해 Transaction[]이 된 뒤에야
+ * report.ts의 순수 포매터에 넘깁니다.
+ *
+ * runAdd과 달리 매개변수에 args가 없습니다. report 명령은 아직 위치 인자를 받지 않으므로,
+ * 쓰지도 않을 인자를 모양만 맞추려고 받지는 않습니다. 나중에 기간이나 계좌로 거를 인자가
+ * 생기면 그때 매개변수를 더합니다.
+ */
+function runReport(run: Interpreter): void {
+  const journalText = run({ kind: "readJournal", path: JOURNAL_PATH }) as string;
+  const rawJournal = JSON.parse(journalText) as unknown;
+
+  const journal = parseJournal(rawJournal);
+  if (!journal.ok) {
+    run({ kind: "print", text: `저널을 읽지 못했습니다: ${journal.error}` });
+    process.exitCode = 1;
+    return;
+  }
+
+  run({ kind: "print", text: formatReport(journal.value) });
+}
+
+/*
  * 기록용 인터프리터는 runCommand를 감싼 것이므로 --record 실행은 진짜 실행입니다.
  * journal.json도 실제로 바뀌고, 그 뒤에 같은 실행에서 지나간 커맨드를 run-log.json에
  * 저장합니다.
@@ -215,10 +240,15 @@ function main(command: Command, argv: readonly string[]): void {
 
       break;
     }
-    case "report":
-      console.log("report 명령은 아직 구현되지 않았습니다.");
-      console.log(`인자: ${command.args.join(", ")}`);
+    case "report": {
+      /*
+       * report는 저널을 읽기만 하므로 --record는 붙이지 않습니다. --dry-run은 읽기를
+       * 그대로 위임하고 출력만 가로채므로, 리포트 본문 앞에 [드라이런] 접두사가 붙습니다.
+       */
+      const { dryRun } = takeFlags(command.args);
+      runReport(dryRun ? runCommandDryRun : runCommand);
       break;
+    }
     case "budget":
       console.log("budget 명령은 아직 구현되지 않았습니다.");
       console.log(`인자: ${command.args.join(", ")}`);
@@ -252,249 +282,16 @@ if (import.meta.main) {
 }
 
 export type { Command };
-export { JOURNAL_PATH, RUN_LOG_PATH, parseCommand, runAdd, takeFlags };
+export { JOURNAL_PATH, RUN_LOG_PATH, parseCommand, runAdd, runReport, takeFlags };
 
 /*
  * 실측 기록
  *
  * 실행 위치: projects/ledger
  *
- * 거래 세 개가 들어 있는 journal.json과 직전 단계의 run-log.json에서 시작했습니다.
- * 검증 전에 파일을 복사해 두고, 아래 확인을 끝낸 뒤 원래 내용으로 되돌렸습니다.
- *
  * $ shasum -a 256 journal.json run-log.json
- * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
- * c7e81100268fd2610715fd78de670bd9e75b3b1dd1e6633241976c63437d05fa  run-log.json
- *
- * $ npx tsc -p .
- * 출력 없음
- * 종료 코드: 0
- *
- * 이번 변경에서는 cli.ts를 다른 파일이 import해도 바로 실행되지 않게 했습니다.
- * 직접 실행하는 CLI 동작은 그대로인지 아래 세 명령으로 확인했습니다.
- *
- * $ node src/cli.ts add 100 식비 --dry-run
- * [드라이런] journal.json에 쓸 내용:
- * [
- *   {
- *     "kind": "simple",
- *     "id": "tx-2026-08-04-1",
- *     "date": "2026-08-04",
- *     "memo": "점심",
- *     "debit": {
- *       "accountId": "acct-food",
- *       "amountMinor": 15000,
- *       "currency": "KRW",
- *       "side": "debit"
- *     },
- *     "credit": {
- *       "accountId": "acct-checking",
- *       "amountMinor": 15000,
- *       "currency": "KRW",
- *       "side": "credit"
- *     }
- *   },
- *   {
- *     "kind": "simple",
- *     "id": "tx-2026-08-04-2",
- *     "date": "2026-08-04",
- *     "memo": "점심",
- *     "debit": {
- *       "accountId": "acct-food",
- *       "amountMinor": 15000,
- *       "currency": "KRW",
- *       "side": "debit"
- *     },
- *     "credit": {
- *       "accountId": "acct-checking",
- *       "amountMinor": 15000,
- *       "currency": "KRW",
- *       "side": "credit"
- *     }
- *   },
- *   {
- *     "kind": "simple",
- *     "id": "tx-2026-08-04-3",
- *     "date": "2026-08-04",
- *     "memo": "커피",
- *     "debit": {
- *       "accountId": "acct-food",
- *       "amountMinor": 5000,
- *       "currency": "KRW",
- *       "side": "debit"
- *     },
- *     "credit": {
- *       "accountId": "acct-checking",
- *       "amountMinor": 5000,
- *       "currency": "KRW",
- *       "side": "credit"
- *     }
- *   },
- *   {
- *     "kind": "simple",
- *     "id": "tx-2026-08-04-4",
- *     "date": "2026-08-04",
- *     "memo": "식비",
- *     "debit": {
- *       "accountId": "acct-food",
- *       "amountMinor": 100,
- *       "currency": "KRW",
- *       "side": "debit"
- *     },
- *     "credit": {
- *       "accountId": "acct-checking",
- *       "amountMinor": 100,
- *       "currency": "KRW",
- *       "side": "credit"
- *     }
- *   }
- * ]
- *
- * [드라이런] 출력할 내용: 기록 완료. 누적 차변 합계: 35100
- * 종료 코드: 0
- *
- * $ node src/cli.ts add 100 식비
- * 기록 완료. 누적 차변 합계: 35100
- * 종료 코드: 0
- *
- * $ node -e 'const j=require("./journal.json"); console.log(j.length); console.log(j.at(-1).memo); console.log(j.at(-1).debit.amountMinor);'
- * 4
- * 식비
- * 100
- *
- * $ node src/cli.ts report
- * report 명령은 아직 구현되지 않았습니다.
- * 인자:
- * 종료 코드: 0
- *
- * 위 확인 뒤 journal.json을 원래 내용으로 되돌렸습니다. 아래 --record 묶음은
- * 직전 단계에서 run-log.json을 만들 때 남긴 실측 기록입니다.
- *
- * --record는 실제 실행을 기록하므로 journal.json에 거래가 하나 늘고,
- * run-log.json에는 실행 커맨드와 읽기 결과가 남습니다.
- *
- * $ node src/cli.ts add 5000 커피 --record
- * 기록 완료. 누적 차변 합계: 35000
- * 종료 코드: 0
- *
- * $ node -e 'const j=require("./journal.json"); console.log(j.length); console.log(j.at(-1).memo); console.log(j.at(-1).debit.amountMinor);'
- * 3
- * 커피
- * 5000
- *
- * $ node -e 'const log=require("./run-log.json"); console.log(JSON.stringify({argv: log.argv, kinds: log.entries.map((entry) => entry.command.kind), hasResult: log.entries.map((entry) => Object.hasOwn(entry, "result"))}, null, 2));'
- * {
- *   "argv": [
- *     "add",
- *     "5000",
- *     "커피",
- *     "--record"
- *   ],
- *   "kinds": [
- *     "readJournal",
- *     "readClock",
- *     "writeJournal",
- *     "print"
- *   ],
- *   "hasResult": [
- *     true,
- *     true,
- *     false,
- *     false
- *   ]
- * }
- *
- * run-log.json 전문은 길어서 구조가 드러나는 부분만 발췌합니다. readJournal과
- * readClock에는 result가 있고, writeJournal과 print에는 result가 없습니다.
- *
- * $ sed -n '1,34p' run-log.json
- * {
- *   "argv": [
- *     "add",
- *     "5000",
- *     "커피",
- *     "--record"
- *   ],
- *   "entries": [
- *     {
- *       "command": {
- *         "kind": "readJournal",
- *         "path": "journal.json"
- *       },
- *       "result": "[\n  {\n    \"kind\": \"simple\",\n    \"id\": \"tx-2026-08-04-1\",\n    ...
- *
- * $ node src/cli.ts add 100 식비 --dry-run
- * [드라이런] journal.json에 쓸 내용:
- * ... 긴 JSON 출력 생략 ...
- *
- * [드라이런] 출력할 내용: 기록 완료. 누적 차변 합계: 35100
- * 종료 코드: 0
- *
- * $ shasum -a 256 journal.json
- * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
- *
- * 드라이런 전 해시도 같은 cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156였으므로
- * journal.json은 바뀌지 않았습니다.
- *
- * 플래그 없이 실행하면 기존 실행 인터프리터가 들어가므로 파일에 실제 거래가 하나 늘어납니다.
- *
- * $ node src/cli.ts add 100 식비
- * 기록 완료. 누적 차변 합계: 35100
- * 종료 코드: 0
- *
- * $ node -e 'const j=require("./journal.json"); console.log(j.length); console.log(j.at(-1).memo); console.log(j.at(-1).debit.amountMinor);'
- * 4
- * 식비
- * 100
- *
- * journal.json 복원 뒤:
- *
- * $ wc -c journal.json
- *      745 journal.json
- *
- * $ shasum -a 256 journal.json
- * ecaee8e1653fe2821fa99b8f65c5755523c5e5214743db7a54ae5f7f07366b1d  journal.json
- *
- * $ npx tsc -p .
- * 출력 없음
- * 종료 코드: 0
- *
- * replay 명령을 더한 뒤 같은 흐름을 다시 확인했습니다. 거래 두 개가 든 journal.json에서
- * 커피 거래를 --record로 기록하고, 그 로그를 replay로 재생했습니다.
- *
- * $ node src/cli.ts add 5000 커피 --record
- * 기록 완료. 누적 차변 합계: 35000
- * 종료 코드: 0
- *
- * $ shasum -a 256 journal.json run-log.json
- * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
- * d62b49c41996008ce52016b2c6751956a7322d2c8e7c48b8a74552ba5f835a68  run-log.json
- *
- * $ node src/cli.ts replay
- * [리플레이] journal.json에 쓸 내용:
- * ... 거래 세 개가 든 JSON 출력 생략 ...
- *
- * [리플레이] 출력할 내용: 기록 완료. 누적 차변 합계: 35000
- * 종료 코드: 0
- *
- * $ shasum -a 256 journal.json run-log.json
- * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
- * d62b49c41996008ce52016b2c6751956a7322d2c8e7c48b8a74552ba5f835a68  run-log.json
- *
- * 재생 전후 해시가 같으므로 replay는 두 파일을 바꾸지 않았습니다. 재생이 보여 준 쓸 내용은
- * --record 실행이 실제로 적은 journal.json과 같습니다.
- *
- * $ node src/verify-replay.ts
- * 리플레이 일치
- * 비교한 커맨드 수: 2
- * 종료 코드: 0
- *
- * run-log.json이 없으면 loadRunLog가 무엇을 먼저 해야 하는지 알려 주며 멈춥니다.
- *
- * $ node src/cli.ts replay
- * ... 스택 추적 생략 ...
- * Error: 실행 로그를 찾지 못했습니다. 먼저 node src/cli.ts add ... --record 명령으로 run-log.json 파일을 만드십시오.
- * 종료 코드: 1
+ * b2930f45ef3fb61e6baf836804188eb7c85ff3c94225093eb02e18968928542a  journal.json
+ * 23290b0d7886aef2d88a091b351883743b556d35463c0fa2ece4240ea79dc42d  run-log.json
  *
  * $ npx tsc -p .
  * 출력 없음
@@ -505,4 +302,36 @@ export { JOURNAL_PATH, RUN_LOG_PATH, parseCommand, runAdd, takeFlags };
  * $ npx tsc --noEmit
  * 출력 없음
  * 종료 코드: 0
+ *
+ * 실행 위치: projects/ledger
+ *
+ * $ node src/cli.ts report
+ * 거래 리포트: 5건
+ * 단순 | 2026-08-04 | 점심 | acct-food ← acct-checking | 차변 15000원
+ * 단순 | 2026-08-04 | 점심 | acct-food ← acct-checking | 차변 15000원
+ * 단순 | 2026-08-04 | 커피 | acct-food ← acct-checking | 차변 5000원
+ * 단순 | 2026-08-04 | 간식 | acct-food ← acct-checking | 차변 777원
+ * 단순 | 2026-08-04 | 책 | acct-food ← acct-checking | 차변 2500원
+ * 차변 합계: 38277원
+ * 종료 코드: 0
+ *
+ * $ node src/cli.ts report --dry-run
+ * [드라이런] 출력할 내용: 거래 리포트: 5건
+ * 단순 | 2026-08-04 | 점심 | acct-food ← acct-checking | 차변 15000원
+ * 단순 | 2026-08-04 | 점심 | acct-food ← acct-checking | 차변 15000원
+ * 단순 | 2026-08-04 | 커피 | acct-food ← acct-checking | 차변 5000원
+ * 단순 | 2026-08-04 | 간식 | acct-food ← acct-checking | 차변 777원
+ * 단순 | 2026-08-04 | 책 | acct-food ← acct-checking | 차변 2500원
+ * 차변 합계: 38277원
+ * 종료 코드: 0
+ *
+ * $ node src/ledger.ts
+ * (기존 데모 출력 그대로 — 이번 변경 전 출력과 diff로 대조해 한 글자도 다르지 않았습니다.)
+ * 종료 코드: 0
+ *
+ * $ shasum -a 256 journal.json run-log.json
+ * b2930f45ef3fb61e6baf836804188eb7c85ff3c94225093eb02e18968928542a  journal.json
+ * 23290b0d7886aef2d88a091b351883743b556d35463c0fa2ece4240ea79dc42d  run-log.json
+ *
+ * 검증 전후 해시가 같으므로 report 실행은 journal.json과 run-log.json을 바꾸지 않았습니다.
  */
