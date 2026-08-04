@@ -40,4 +40,35 @@ const colorsLength: ColorsLength = 4;
 // 그 길이를 답으로 읽는다. 같은 도구를 반대로 쥐면 만드는 일이 세는 일이 된다.
 console.log("색상 개수:", colorsLength);
 
+// 두 타입에 같은 모양의 런타임 함수를 붙인다. 결과의 구체적인 모양은 Reverse<T>와 Length<T>가
+// 바깥에서 계산하고, 본문은 실제 배열 연산의 결과를 그 계약으로 단언한다.
+function reverseTuple<T extends readonly unknown[]>(list: T): Reverse<T> {
+  return [...list].reverse() as Reverse<T>;
+}
+
+function countTuple<T extends readonly unknown[]>(list: T): Length<T> {
+  return list.length as Length<T>;
+}
+
+// 리터럴 튜플을 넣으면 앞에서 타입으로만 확인한 두 결과가 함수의 반환 타입에도 그대로 나온다.
+// 아래 두 대입이 통과하는 것이 그 증거다.
+const reversedByFunction: ["yellow", "blue", "green", "red"] = reverseTuple(colors);
+const lengthByFunction: 4 = countTuple(colors);
+
+// process.argv.slice(2)의 타입은 string[]이다. 값은 여러 개 들어 있어도 타입에는 길이가 없다.
+// 길이를 모르는 배열은 [infer Head, ...infer Tail]에 맞지 않아 조건이 첫 걸음에서 거짓이 되고,
+// 두 타입 모두 초기 누산기 그대로 끝난다. Reverse<string[]>는 [], Length<string[]>는 0이다.
+const args = process.argv.slice(2);
+const cliReversed = reverseTuple(args);
+const cliLength = countTuple(args);
+
+// 이 두 대입이 통과한다는 사실이 곧 그 증거다. 화면에 찍히는 값은 제대로 뒤집히고 제대로 세지만,
+// 타입이 아는 것은 빈 튜플과 0뿐이다. 머리와 꼬리로 쪼갤 수 있는 것은 길이가 정해진 튜플뿐이라,
+// 타입 레벨 결과를 보이려면 위처럼 as const로 고정한 리터럴 튜플을 따로 세워야 한다.
+const argsReversedProof: [] = cliReversed;
+const argsLengthProof: 0 = cliLength;
+
+console.log("Reversed:", cliReversed);
+console.log("Length:", cliLength);
+
 export {};
