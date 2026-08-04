@@ -35,3 +35,9 @@ if (__DEV__) {
 // episodes/s16-declaration-files/env-flags.ts(19,9): error TS2669: Augmentations for the global scope can only be directly nested in external modules or ambient module declarations.
 // episodes/s16-declaration-files/env-flags.ts(23,12): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.
 // episodes/s16-declaration-files/env-flags.ts(25,5): error TS2304: Cannot find name '__DEV__'.
+
+// codeStep 244 — 두 선언은 서로 다른 파일에서 왔지만 같은 전역 스코프에 있습니다.
+
+console.log(
+  "API_KEY 선언 출처: env.d.ts, __DEV__ 선언 출처: env-flags.ts의 declare global",
+);
