@@ -1,0 +1,7 @@
+{
+  "name": "ledger",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "복식부기 저널·예산 CLI (§17 프로젝트)입니다."
+}
