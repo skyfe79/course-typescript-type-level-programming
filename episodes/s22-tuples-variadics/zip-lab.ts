@@ -33,4 +33,42 @@ console.log(`zipPair 첫 행의 0번 열은 숫자 메서드 결과 ${firstPairN
 console.log(`zipPair 첫 행의 1번 열은 문자열 메서드 결과 ${firstPairString}입니다.`);
 console.log(`string으로 받아 둔 0번 열의 실제 값은 ${String(firstPairAsString)}입니다.`);
 
+// 배열 목록 전체를 튜플 타입 매개변수 하나로 받고, 그 튜플을 자리별로 매핑해
+// 열 개수만큼의 원소 타입을 만든다. 그래서 배열을 몇 개 넣든 열이 그만큼 늘어난다.
+type ZippedRow<T extends readonly unknown[][]> = {
+  [K in keyof T]: T[K] extends readonly (infer U)[] ? U : never;
+};
+
+function zip<T extends readonly unknown[][]>(...arrays: T): Array<ZippedRow<T>> {
+  const length = arrays.length === 0 ? 0 : Math.min(...arrays.map((array) => array.length));
+  const rows: Array<ZippedRow<T>> = [];
+
+  for (let index = 0; index < length; index += 1) {
+    // 런타임의 map은 결과 길이와 자리 정보를 튜플로 증명하지 못하므로 여기에서만 단언한다.
+    const row = arrays.map((array) => array[index]) as ZippedRow<T>;
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+const triples = zip([1, 2, 3], ["a", "b", "c"], [true, false, true]);
+const firstTripleNumber = triples[0][0].toFixed(1);
+const firstTripleString = triples[0][1].toUpperCase();
+const firstTripleBoolean = triples[0][2].valueOf();
+
+// 네 번째 배열의 원소는 Date다. 원시 타입이 아니어도 그 자리의 타입이 그대로 남는다.
+const quads = zip(
+  [10, 20],
+  ["left", "right"],
+  [false, true],
+  [new Date("2026-01-01T00:00:00.000Z"), new Date("2026-06-01T00:00:00.000Z")],
+);
+const firstQuadDateYear = quads[0][3].getUTCFullYear();
+
+console.log(
+  `zip 세 열은 숫자 ${firstTripleNumber}, 문자열 ${firstTripleString}, 불리언 ${firstTripleBoolean}로 다룰 수 있습니다.`,
+);
+console.log(`네 번째 열은 Date로 남아 getUTCFullYear를 부를 수 있고, 결과는 ${firstQuadDateYear}입니다.`);
+
 export {};
