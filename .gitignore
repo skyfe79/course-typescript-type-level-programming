@@ -41,6 +41,12 @@ build/Release
 node_modules/
 jspm_packages/
 
+# 강의 실습용 모듈 해석 픽스처 (§16 선언 파일 해석 순서 — ep_111)
+# 타입스크립트와 node가 위로 올라가며 찾는 폴더 이름이 node_modules여야 하므로 예외를 둡니다.
+# git은 무시된 디렉터리 안으로 내려가지 않으므로 폴더와 내용 두 줄이 모두 필요합니다.
+!episodes/s16-declaration-files/resolve-demo/node_modules/
+!episodes/s16-declaration-files/resolve-demo/node_modules/**
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
