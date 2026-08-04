@@ -39,4 +39,20 @@ acceptAppleOrBanana("apple");
 // 주석을 풀면 error TS2345: Argument of type '"cherry"' is not assignable to parameter of type 'AppleOrBanana'. 오류가 난다.
 // acceptAppleOrBanana("cherry"); // 컴파일 오류 — "cherry"는 AppleOrBanana에 남지 않았다
 
+// 한쪽 방향 대입만으로는 직접 만든 타입이 표준 타입에 포함된다는 사실까지만 확인된다.
+// 양쪽 모두 대입되어야 서로 빠진 멤버가 없는 같은 타입이라고 볼 수 있다.
+const libraryExclude: Exclude<Fruit, "apple"> = "banana";
+const mineExclude: NoApple = libraryExclude;
+const backToLibraryExclude: Exclude<Fruit, "apple"> = mineExclude;
+
+// Extract도 같은 방식으로 표준 타입에서 직접 만든 타입으로, 다시 표준 타입으로 값을 옮긴다.
+// 두 방향 대입이 모두 통과하면 "apple" | "banana"라는 결과가 서로 같다는 뜻이다.
+const libraryExtract: Extract<Fruit, "apple" | "banana"> = "apple";
+const mineExtract: AppleOrBanana = libraryExtract;
+const backToLibraryExtract: Extract<Fruit, "apple" | "banana"> = mineExtract;
+
+// backToLibraryExclude와 backToLibraryExtract는 대입 자체가 검사이므로 값을 다시 쓰지 않는다.
+// 런타임에서는 앞의 호출 두 개와 최종 확인 메시지만 출력한다.
+console.log("Exclude와 Extract 직접 구현이 표준 라이브러리와 일치합니다.");
+
 export {};
