@@ -34,4 +34,7 @@ firstTyped([]);
 // episodes/s20-why-type-level/guarantee-demo.ts(31,12): error TS2345: Argument of type '[]' is not assignable to parameter of type 'NonEmptyArray<unknown>'.
 //   Source has 0 element(s) but target requires 1.
 
+console.log("런타임 버전: 컴파일은 통과하지만 실행 중에야 실패를 알린다");
+console.log("타입 레벨 버전: 빈 배열을 넘기는 순간 컴파일이 막힌다");
+
 export {};
