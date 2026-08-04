@@ -18,4 +18,17 @@ const checkString: CheckString = false;
 
 console.log(checkArray, checkString);
 
+// describeIsArray는 런타임의 Array.isArray 결과를 조건부 타입의 결과로 옮기는 함수다.
+// 호출할 때 넘긴 값의 타입 T가 정해지면 IsArray<T>도 true 또는 false로 풀린다.
+function describeIsArray<T>(sample: T): IsArray<T> {
+  // 함수 본문을 검사하는 동안 IsArray<T>는 아직 갈라지지 않은 지연된 조건부 타입이다.
+  // Array.isArray가 만든 boolean 값을 컴파일러가 IsArray<T>와 곧바로 맞추지는 못하므로 단언한다.
+  return (Array.isArray(sample) ? true : false) as IsArray<T>;
+}
+
+// 여기서는 T가 number[]로 채워지므로 반환 타입은 true가 된다.
+console.log(describeIsArray([1, 2, 3]));
+// 여기서는 T가 string으로 채워지므로 반환 타입은 false가 된다.
+console.log(describeIsArray("문자열"));
+
 export {};
