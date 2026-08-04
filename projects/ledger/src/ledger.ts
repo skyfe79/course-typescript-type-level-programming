@@ -21,6 +21,8 @@
  * 이번 화는 그 둘을 나눠 선언합니다. 값 객체를 먼저 만들고, 엔티티를 그 위에 얹습니다.
  * 이제 AccountId, Money, IsoDate 세 값 타입은 모두 스마트 생성자를 거쳐야만
  * 만들어지며, 각 생성자가 자기 값에 맞는 런타임 검증을 맡습니다.
+ * 여기에 거래의 두 모양도 판별 유니온으로 더합니다. 단순 거래와 분할 거래가
+ * 어떤 필드를 가져야 하는지 타입 선언만으로 먼저 고정합니다.
  */
 
 /*
@@ -42,8 +44,8 @@ function makeAccountId(raw: string): AccountId {
  * IsoDate는 문자열처럼 출력하고 저장할 수 있지만, YYYY-MM-DD 형식을 확인한
  * 문자열만 날짜 값으로 다루도록 브랜드를 붙입니다.
  *
- * 실제 사용은 다음 화 이후 거래 타입을 만들 때 시작합니다. 지금은 생성자가
- * 어떤 문자열을 통과시키고 거부하는지 확인하는 데 집중합니다.
+ * 이제 Transaction의 date 필드가 이 타입을 실제 날짜 값으로 사용합니다.
+ * 생성자는 어떤 문자열을 통과시키고 거부하는지 런타임에서 계속 보여줍니다.
  */
 declare const isoDateBrand: unique symbol;
 type IsoDate = string & { readonly [isoDateBrand]: true };
@@ -76,7 +78,7 @@ type Money = {
    * amountMinor는 항상 0 이상입니다. 금액에 음수를 허용하면 같은 경제적
    * 사실 하나를 "음수 대변"과 "양수 차변" 두 가지 방식으로 똑같이 나타낼 수
    * 있어, 실제로 필요한 상태 수보다 표현 가능한 상태 수가 두 배로 불어납니다.
-   * 방향은 다음 화 이후 거래 타입에서 별도 필드 하나로만 나타냅니다.
+   * 방향은 EntryLine.side 필드 하나로만 나타냅니다.
    *
    * 이제 makeMoney가 이 결정을 실제 런타임 검증으로 강제합니다.
    */
@@ -188,6 +190,143 @@ try {
   console.log((err as Error).message);
 }
 
+/*
+ * 여기부터는 거래입니다.
+ *
+ * 저널 한 줄은 어느 계좌에서 얼마가 어느 방향으로 움직였는지를 나타냅니다.
+ * 금액은 항상 0 이상이므로(Money 주석 참고) 방향은 side 필드가 따로 맡습니다.
+ */
+type EntryLine = {
+  readonly accountId: AccountId;
+  readonly amount: Money;
+  readonly side: "debit" | "credit";
+};
+
+/*
+ * 거래는 두 모양뿐입니다. 한 줄씩 맞바꾸는 단순 거래와, 여러 줄로 나뉜 분할
+ * 거래입니다. 두 모양을 kind 판별자로 구분하고, 각 갈래에 이름을 붙여 둡니다.
+ * 갈래에 이름이 있으면 다음 절의 생성자가 자기 갈래 타입을 그대로 돌려줄 수
+ * 있고, 호출 쪽은 유니온 좁히기 없이 그 갈래 전용 필드를 바로 읽습니다.
+ */
+type SimpleTransaction = {
+  readonly kind: "simple";
+  readonly id: string;
+  readonly date: IsoDate;
+  readonly memo: string;
+  readonly debit: EntryLine;
+  readonly credit: EntryLine;
+};
+
+type SplitTransaction = {
+  readonly kind: "split";
+  readonly id: string;
+  readonly date: IsoDate;
+  readonly memo: string;
+  readonly debits: readonly EntryLine[];
+  readonly credits: readonly EntryLine[];
+};
+
+type Transaction = SimpleTransaction | SplitTransaction;
+
+function sumMinor(lines: readonly EntryLine[]): number {
+  return lines.reduce((total, line) => total + line.amount.amountMinor, 0);
+}
+
+/*
+ * 생성자는 거래 값을 조립하기 전에 먼저 차변과 대변의 균형을 확인합니다.
+ * 균형이 맞을 때만 값을 내놓으므로, 불균형 거래는 만들어진 뒤에 검사해서
+ * 거르는 대상이 아니라 애초에 존재할 수 없는 값이 됩니다.
+ */
+function makeSimpleTransaction(
+  id: string,
+  date: IsoDate,
+  memo: string,
+  debit: EntryLine,
+  credit: EntryLine,
+): SimpleTransaction {
+  if (debit.amount.amountMinor !== credit.amount.amountMinor) {
+    throw new Error(
+      `Unbalanced transaction ${id}: debit ${debit.amount.amountMinor} != credit ${credit.amount.amountMinor}`,
+    );
+  }
+
+  return { kind: "simple", id, date, memo, debit, credit };
+}
+
+// 분할 거래는 두 쪽의 합계를 sumMinor로 구해 비교합니다.
+// 아래에서는 실제 split 값도 이 생성자로 만들어 단순 거래와 같은 방식으로 설명합니다.
+function makeSplitTransaction(
+  id: string,
+  date: IsoDate,
+  memo: string,
+  debits: readonly EntryLine[],
+  credits: readonly EntryLine[],
+): SplitTransaction {
+  const debitTotal = sumMinor(debits);
+  const creditTotal = sumMinor(credits);
+
+  if (debitTotal !== creditTotal) {
+    throw new Error(`Unbalanced transaction ${id}: debits ${debitTotal} != credits ${creditTotal}`);
+  }
+
+  return { kind: "split", id, date, memo, debits, credits };
+}
+
+const lunch = makeSimpleTransaction(
+  "tx-1",
+  makeIsoDate("2026-08-01"),
+  "점심",
+  { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "debit" },
+  { accountId: makeAccountId("acct-checking"), amount: makeMoney(15000, "KRW"), side: "credit" },
+);
+console.log(lunch.kind, lunch.debit.amount.amountMinor);
+
+try {
+  makeSimpleTransaction(
+    "tx-bad",
+    makeIsoDate("2026-08-01"),
+    "잘못 입력",
+    { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "debit" },
+    { accountId: makeAccountId("acct-checking"), amount: makeMoney(12000, "KRW"), side: "credit" },
+  );
+} catch (err) {
+  // tx-bad의 try/catch는 불균형 거래가 애초에 값으로 존재할 수 없음을 실행으로 보여줍니다.
+  console.log((err as Error).message);
+}
+
+function describeTransaction(tx: Transaction): string {
+  switch (tx.kind) {
+    case "simple":
+      return `${tx.date} ${tx.memo}: ${tx.debit.accountId} ← ${tx.credit.accountId} (${tx.debit.amount.amountMinor})`;
+    case "split":
+      return `${tx.date} ${tx.memo}: 분할 거래 (차변 ${tx.debits.length}줄, 대변 ${tx.credits.length}줄)`;
+    default: {
+      /*
+       * tx를 never에 대입하는 이 줄이 통과한다는 사실 자체가, 이 시점에
+       * simple과 split 두 갈래가 전부 처리됐다는 컴파일러의 증명입니다.
+       * 나중에 Transaction에 세 번째 갈래가 추가되는데 이 switch에 그 case를
+       * 잊으면 tx가 더는 never로 좁혀지지 않아 바로 이 줄에서 컴파일이 막힙니다.
+       */
+      const _exhaustive: never = tx;
+      return _exhaustive;
+    }
+  }
+}
+
+const groceries = makeSplitTransaction(
+  "tx-2",
+  makeIsoDate("2026-08-02"),
+  "장보기",
+  [
+    { accountId: makeAccountId("acct-food"), amount: makeMoney(30000, "KRW"), side: "debit" },
+    { accountId: makeAccountId("acct-supplies"), amount: makeMoney(12000, "KRW"), side: "debit" },
+  ],
+  [{ accountId: makeAccountId("acct-checking"), amount: makeMoney(42000, "KRW"), side: "credit" }],
+);
+
+console.log(describeTransaction(lunch));
+console.log(describeTransaction(groceries));
+
 export {};
 
 /*
@@ -203,6 +342,10 @@ export {};
  * 15000 KRW
  * 2026-08-02
  * IsoDate must match YYYY-MM-DD (received "08/02/2026")
+ * simple 15000
+ * Unbalanced transaction tx-bad: debit 15000 != credit 12000
+ * 2026-08-01 점심: acct-food ← acct-checking (15000)
+ * 2026-08-02 장보기: 분할 거래 (차변 2줄, 대변 1줄)
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -212,7 +355,13 @@ export {};
  * 검증된 AccountId를 문자열처럼 출력할 수 있음을 보여줍니다. 다섯째 줄은
  * 검증된 Money도 일반 객체처럼 필드를 읽어 출력할 수 있음을 보여줍니다.
  * 여섯째 줄은 형식을 통과한 IsoDate를 그대로 출력한 결과입니다. 일곱째 줄은
- * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다.
+ * 형식이 다른 문자열을 makeIsoDate가 거부한 오류 메시지입니다. 여덟째 줄은
+ * 균형이 맞는 단순 거래가 생성되어 simple 갈래와 금액을 바로 읽을 수 있음을 보여줍니다.
+ * 아홉째 줄은 tx-bad가 생성자 안의 균형 검사를 통과하지 못해 값으로 만들어지지 않았음을
+ * try/catch로 확인한 오류 메시지입니다. 열째 줄은 simple 갈래가 describeTransaction의
+ * "simple" case를 통과해 날짜, 메모, 차변/대변 계좌, 금액으로 설명되는 모습입니다.
+ * 열한째 줄은 makeSplitTransaction으로 만든 균형 잡힌 split 갈래가 분할 거래 설명으로
+ * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
  *
  * $ npx tsc -p .
  * 출력 없음
