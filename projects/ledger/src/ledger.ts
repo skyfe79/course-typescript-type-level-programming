@@ -215,10 +215,15 @@ type EntryLine = {
 };
 
 /*
- * 거래는 두 모양뿐입니다. 한 줄씩 맞바꾸는 단순 거래와, 여러 줄로 나뉜 분할
- * 거래입니다. 두 모양을 kind 판별자로 구분하고, 각 갈래에 이름을 붙여 둡니다.
- * 갈래에 이름이 있으면 다음 절의 생성자가 자기 갈래 타입을 그대로 돌려줄 수
- * 있고, 호출 쪽은 유니온 좁히기 없이 그 갈래 전용 필드를 바로 읽습니다.
+ * 거래는 세 모양입니다. 한 줄씩 맞바꾸는 단순 거래, 여러 줄로 나뉜 분할 거래,
+ * 그리고 지나간 거래를 되돌리는 환불 거래입니다. 세 모양을 kind 판별자로 구분하고,
+ * 각 갈래에 이름을 붙여 둡니다. 갈래에 이름이 있으면 다음 절의 생성자가 자기 갈래
+ * 타입을 그대로 돌려줄 수 있고, 호출 쪽은 유니온 좁히기 없이 그 갈래 전용 필드를
+ * 바로 읽습니다.
+ *
+ * 처음 두 갈래로 출발했다가 환불 갈래는 나중에 더했습니다. 그때 이 유니온을 읽는
+ * 코드 중 무엇이 먼저 깨졌고 무엇은 조용히 넘어갔는지가 report.ts의 실측 기록에
+ * 남아 있습니다.
  */
 type SimpleTransaction = {
   readonly kind: "simple";
@@ -238,7 +243,17 @@ type SplitTransaction = {
   readonly credits: readonly EntryLine[];
 };
 
-type Transaction = SimpleTransaction | SplitTransaction;
+type RefundTransaction = {
+  readonly kind: "refund";
+  readonly id: string;
+  readonly date: IsoDate;
+  readonly memo: string;
+  readonly refundOf: string; // 되돌리는 원거래의 id
+  readonly debit: EntryLine;
+  readonly credit: EntryLine;
+};
+
+type Transaction = SimpleTransaction | SplitTransaction | RefundTransaction;
 
 function sumMinor(lines: readonly EntryLine[]): number {
   return lines.reduce((total, line) => total + line.amount.amountMinor, 0);
@@ -284,6 +299,23 @@ function makeSplitTransaction(
   return { kind: "split", id, date, memo, debits, credits };
 }
 
+function makeRefundTransaction(
+  id: string,
+  date: IsoDate,
+  memo: string,
+  refundOf: string,
+  debit: EntryLine,
+  credit: EntryLine,
+): RefundTransaction {
+  if (debit.amount.amountMinor !== credit.amount.amountMinor) {
+    throw new Error(
+      `Unbalanced transaction ${id}: debit ${debit.amount.amountMinor} != credit ${credit.amount.amountMinor}`,
+    );
+  }
+
+  return { kind: "refund", id, date, memo, refundOf, debit, credit };
+}
+
 const lunch = makeSimpleTransaction(
   "tx-1",
   makeIsoDate("2026-08-01"),
@@ -312,6 +344,8 @@ function describeTransaction(tx: Transaction): string {
       return `${tx.date} ${tx.memo}: ${tx.debit.accountId} ← ${tx.credit.accountId} (${tx.debit.amount.amountMinor})`;
     case "split":
       return `${tx.date} ${tx.memo}: 분할 거래 (차변 ${tx.debits.length}줄, 대변 ${tx.credits.length}줄)`;
+    case "refund":
+      return `${tx.date} ${tx.memo}: 원거래 ${tx.refundOf} 환불 ${tx.debit.accountId} ← ${tx.credit.accountId} (${tx.debit.amount.amountMinor})`;
     default: {
       /*
        * tx를 never에 대입하는 이 줄이 통과한다는 사실 자체가, 이 시점에
@@ -338,6 +372,16 @@ const groceries = makeSplitTransaction(
 
 demo(describeTransaction(lunch));
 demo(describeTransaction(groceries));
+
+const refund = makeRefundTransaction(
+  "tx-5",
+  makeIsoDate("2026-08-03"),
+  "점심 환불",
+  "tx-1",
+  { accountId: makeAccountId("acct-checking"), amount: makeMoney(15000, "KRW"), side: "debit" },
+  { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "credit" },
+);
+demo(describeTransaction(refund));
 
 /*
  * 여기부터는 JSON 저널 파일에서 읽어 온 원시 값을 도메인 값으로 파싱하는 구역입니다.
@@ -407,6 +451,7 @@ type RawTransaction = {
   id?: unknown;
   date?: unknown;
   memo?: unknown;
+  refundOf?: unknown;
   debit?: unknown;
   credit?: unknown;
 };
@@ -417,6 +462,10 @@ type RawTransaction = {
  * 함수 전체가 try/catch로 감싸여 있으므로, 이 호출들 중 무엇이 Error를
  * 던지더라도 예외가 함수 밖으로 새지 않고 { ok: false, error } 값으로
  * 바뀝니다. 이 함수가 예외를 값으로 옮기는 경계입니다.
+ *
+ * 유니온에 refund 갈래를 더했을 때도 이 함수는 자동으로 깨지지 않았습니다.
+ * raw.kind는 아직 unknown이므로, 원시 입력 경계에서 허용할 갈래는 사람이 직접
+ * 확인하고 파서 분기로 연결해야 합니다.
  */
 function parseTransaction(raw: RawTransaction): Result<Transaction> {
   try {
@@ -435,6 +484,22 @@ function parseTransaction(raw: RawTransaction): Result<Transaction> {
       return {
         ok: true,
         value: makeSimpleTransaction(raw.id, date, raw.memo, debitResult.value, creditResult.value),
+      };
+    }
+
+    if (raw.kind === "refund") {
+      if (typeof raw.refundOf !== "string") {
+        return { ok: false, error: `invalid refund transaction: ${JSON.stringify(raw)}` };
+      }
+
+      const debitResult = parseEntryLine(raw.debit as RawEntryLine);
+      const creditResult = parseEntryLine(raw.credit as RawEntryLine);
+      if (!debitResult.ok) return debitResult;
+      if (!creditResult.ok) return creditResult;
+
+      return {
+        ok: true,
+        value: makeRefundTransaction(raw.id, date, raw.memo, raw.refundOf, debitResult.value, creditResult.value),
       };
     }
 
@@ -469,6 +534,23 @@ demo(
     memo: "금액 불일치",
     debit: { accountId: "acct-food", amountMinor: 4500, currency: "KRW", side: "debit" },
     credit: { accountId: "acct-checking", amountMinor: 4000, currency: "KRW", side: "credit" },
+  }),
+);
+
+/*
+ * 원시 환불 거래도 같은 파서를 지나 검증된 값이 됩니다. 이 분기는 컴파일러가 요구해서
+ * 더한 것이 아니라, 유니온을 넓힌 뒤 사람이 직접 찾아 더한 것입니다. 위 주석에 적어 둔
+ * 대로 raw.kind는 unknown이라 타입 검사가 이 빠짐을 지적하지 않았습니다.
+ */
+demo(
+  parseTransaction({
+    kind: "refund",
+    id: "tx-6",
+    date: "2026-08-03",
+    memo: "커피 환불",
+    refundOf: "tx-3",
+    debit: { accountId: "acct-checking", amountMinor: 4500, currency: "KRW", side: "debit" },
+    credit: { accountId: "acct-food", amountMinor: 4500, currency: "KRW", side: "credit" },
   }),
 );
 
@@ -554,9 +636,9 @@ type Command =
  * input.ok를 먼저 확인해야 input.value를 읽을 수 있습니다. Result<T>가 판별
  * 유니온이라 좁히기 전에는 성공 갈래의 필드에 손댈 수 없습니다.
  *
- * 누적 차변 합계를 구할 때 simple 갈래는 차변이 한 줄인 debit이고, split 갈래는
- * 여러 줄인 debits입니다. 그래서 kind로 좁힌 뒤 각 갈래의 차변 줄만 모아
- * sumMinor에 넘깁니다.
+ * 누적 차변 합계를 구할 때 split 갈래만 차변이 여러 줄인 debits입니다. 조건을
+ * tx.kind === "split"으로 두면 simple과 refund처럼 차변이 한 줄인 갈래가 같은
+ * 쪽에 모이고, 새 단일 차변 갈래를 더해도 표현이 불필요하게 길어지지 않습니다.
  *
  * 돌려주는 커맨드들은 아직 계획일 뿐이며, 실제로 아무 일도 일어나지 않습니다.
  */
@@ -570,7 +652,7 @@ function decide(existing: readonly Transaction[], input: Result<Transaction>): r
 
   const updated = [...existing, input.value];
   const debitTotal = sumMinor(
-    updated.flatMap((tx) => (tx.kind === "simple" ? [tx.debit] : tx.debits)),
+    updated.flatMap((tx) => (tx.kind === "split" ? tx.debits : [tx.debit])),
   );
 
   return [
@@ -628,6 +710,7 @@ export { decide, parseJournal, parseTransaction };
  * Unbalanced transaction tx-bad: debit 15000 != credit 12000
  * 2026-08-01 점심: acct-food ← acct-checking (15000)
  * 2026-08-02 장보기: 분할 거래 (차변 2줄, 대변 1줄)
+ * 2026-08-03 점심 환불: 원거래 tx-1 환불 acct-checking ← acct-food (15000)
  * {
  *   ok: true,
  *   value: {
@@ -654,6 +737,18 @@ export { decide, parseJournal, parseTransaction };
  * {
  *   ok: false,
  *   error: 'Unbalanced transaction tx-bad-2: debit 4500 != credit 4000'
+ * }
+ * {
+ *   ok: true,
+ *   value: {
+ *     kind: 'refund',
+ *     id: 'tx-6',
+ *     date: '2026-08-03',
+ *     memo: '커피 환불',
+ *     refundOf: 'tx-3',
+ *     debit: { accountId: 'acct-checking', amount: [Object], side: 'debit' },
+ *     credit: { accountId: 'acct-food', amount: [Object], side: 'credit' }
+ *   }
  * }
  * loaded 2 transactions
  * [
@@ -691,11 +786,13 @@ export { decide, parseJournal, parseTransaction };
  * "simple" case를 통과해 날짜, 메모, 차변/대변 계좌, 금액으로 설명되는 모습입니다.
  * 열한째 줄은 makeSplitTransaction으로 만든 균형 잡힌 split 갈래가 분할 거래 설명으로
  * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
- * 이어지는 두 객체 출력은 parseEntryLine의 결과입니다. 필드가 모두 맞는 원시 값은 ok: true로
+ * 열두째 줄은 이번 화에서 더한 refund 갈래가 원거래 id를 드러내며 설명되는 모습입니다.
+ * 그다음 두 객체 출력은 parseEntryLine의 결과입니다. 필드가 모두 맞는 원시 값은 ok: true로
  * EntryLine까지 조립되고, amountMinor가 빠진 원시 값은 ok: false와 오류 문자열로 남습니다.
- * 그다음 두 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
+ * 그다음 세 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
  * Transaction으로 조립되고, 금액이 어긋난 tx-bad-2는 균형 검사 오류 메시지를 담은 ok: false
- * 값으로 전달됩니다. loaded 2 transactions 줄은 원시 JSON 배열 하나가 parseJournal을 지나
+ * 값으로 전달되며, 세 번째 tx-6은 원시 refund 입력이 이번 화에서 더한 파서 분기를 지나
+ * 검증된 Transaction 값이 된 결과입니다. loaded 2 transactions 줄은 원시 JSON 배열 하나가 parseJournal을 지나
  * 두 개의 검증된 Transaction 값으로 이어졌음을 보여줍니다. 그다음 두 배열 출력은
  * decide의 성공 경로와 실패 경로가 각각 돌려준 커맨드 목록입니다. 파일을 만들거나
  * 화면에 결과를 찍는 실제 동작은 이 파일에서 일어나지 않습니다.
