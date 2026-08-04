@@ -19,4 +19,17 @@ type ExtractedPort = ExtractPort<typeof address>;   // 3000
 const port: ExtractedPort = 3000;
 console.log(`포트 번호 + 1: ${port + 1}`);
 
+// badAddress는 포트 자리에 숫자로 읽을 수 없는 문자를 둔 반례다.
+// 같은 패턴을 통과하지 못하므로 ExtractPort의 거짓 분기로 가는지 확인할 수 있다.
+const badAddress = "localhost:abcd" as const;
+
+// BadPort는 캡처한 조각이 number 제약을 만족하지 못해 남는 값이 없다.
+// 이 결과가 never이면 아무 값도 대입할 수 없는 타입으로 계산된 것이다.
+type BadPort = ExtractPort<typeof badAddress>;   // never
+
+// 주석을 풀면 error TS2322: Type '3000' is not assignable to type 'never'. 오류가 난다.
+// BadPort가 never라서 숫자 3000도 허용되는 값이 아니다.
+// const badPort: BadPort = 3000; // 컴파일 오류 — never에는 아무 값도 대입할 수 없다
+console.log("badAddress는 숫자 포트를 캡처하지 못해 BadPort가 never가 됩니다.");
+
 export {};
