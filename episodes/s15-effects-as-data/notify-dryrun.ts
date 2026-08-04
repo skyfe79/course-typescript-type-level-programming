@@ -55,3 +55,25 @@ function runCommandDryRun(command: NotificationCommand): void {
       break;
   }
 }
+
+// codeStep 230 — 실행용 인터프리터와 나란히 두기
+
+type Interpreter = (command: NotificationCommand) => void;
+
+const runCommand: Interpreter = (command) => {
+  switch (command.kind) {
+    case "sendEmail":
+      console.log(
+        `[이메일] ${command.to} / ${command.subject}: ${command.body}`,
+      );
+      break;
+    case "sendSms":
+      console.log(`[SMS] ${command.to}: ${command.body}`);
+      break;
+    case "log":
+      console.log(`[로그] ${command.message}`);
+      break;
+  }
+};
+
+const interpreters: Interpreter[] = [runCommand, runCommandDryRun];
