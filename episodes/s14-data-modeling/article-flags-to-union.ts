@@ -42,4 +42,12 @@ const publishedState: ArticleState = {
   publishedAt: "2026-08-02",
 };
 
+// codeStep 206 — 판별 유니온이 불가능한 게시 상태 조합을 거부함
+
+// @ts-expect-error - draft 변형에는 archivedAt 필드가 없다
+const impossibleOne: ArticleState = { status: "draft", archivedAt: "2026-08-02" };
+
+// @ts-expect-error - "reviewed"는 세 변형 어디에도 없는 리터럴이다
+const impossibleTwo: ArticleState = { status: "reviewed" };
+
 export {};
