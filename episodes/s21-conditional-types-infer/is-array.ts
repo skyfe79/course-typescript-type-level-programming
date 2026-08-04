@@ -31,4 +31,12 @@ console.log(describeIsArray([1, 2, 3]));
 // 여기서는 T가 string으로 채워지므로 반환 타입은 false가 된다.
 console.log(describeIsArray("문자열"));
 
+// 튜플은 배열의 한 형태이므로 [true, false]는 unknown[]에 할당 가능하다.
+// as const로 만든 readonly 튜플은 unknown[]에 할당 불가능해서 같은 조건이 false로 갈린다.
+const pair: [true, false] = [true, false];
+
+console.log(describeIsArray(pair));           // 튜플도 배열이므로 true
+console.log(describeIsArray({ length: 0 }));  // 배열이 아니므로 false
+console.log(describeIsArray(123));            // 배열이 아니므로 false
+
 export {};
