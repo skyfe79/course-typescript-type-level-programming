@@ -22,8 +22,19 @@
  *      파일 쓰기와 화면 출력 같은 이펙트는 도메인 안에서 바로 실행하지 않고,
  *      커맨드라는 값으로 미뤘다가 인터프리터 계층 하나에서만 실행합니다.
  *
- * 이번 화는 아직 그 보장들을 구현하지 않습니다. 먼저 명령의 표면을
- * 판별 유니온으로 만들고, 나중에 실제 파싱과 도메인 로직이 들어갈 위치를 남깁니다.
+ * 이번 화에서는 add 명령을 순수 코어와 인터프리터에 연결해 보장 3의 실제 경계를
+ * 만듭니다. report와 budget은 아직 표면 명령만 남겨 두고 다음 화들에서 채웁니다.
+ */
+
+import { decide, parseJournal, parseTransaction } from "./ledger.ts";
+import type { Command as CoreCommand, RawTransaction } from "./ledger.ts";
+import { runCommand } from "./interpreter.ts";
+
+/*
+ * 이 파일에도 명령행 표면을 나타내는 Command 타입이 있으므로, 순수 코어의
+ * 커맨드는 CoreCommand라는 다른 이름으로 가져옵니다. 하나는 사용자가 친 명령이고,
+ * 다른 하나는 실행할 이펙트 계획입니다. import가 생겼으므로 이 파일도 모듈이며,
+ * 각 Command 이름은 자기 모듈 안에서만 의미를 갖습니다.
  */
 
 type Command =
@@ -45,11 +56,91 @@ function parseCommand(argv: string[]): Command {
   return { kind: kind as Command["kind"], args };
 }
 
+const JOURNAL_PATH = "journal.json";
+
+/*
+ * 명령행 인자는 아직 검증되지 않은 문자열이므로 여기서는 원시 거래 모양으로만
+ * 옮기고, 실제 검증은 parseTransaction에 맡깁니다. 금액이 숫자가 아니면 Number가
+ * NaN을 만들고, 그 NaN은 makeMoney의 검사에 걸려 ok: false 값으로 돌아옵니다.
+ * 거래 id는 시계에서 얻은 날짜와 저널 길이에서 나온 순번으로 만들며, 이 실습에서는
+ * 차변 계좌를 acct-food, 대변 계좌를 acct-checking으로 고정합니다.
+ */
+function toRawTransaction(args: readonly string[], now: string, sequence: number): RawTransaction {
+  const [amountText = "", memo = "메모 없음"] = args;
+  const date = now.slice(0, 10);
+
+  return {
+    kind: "simple",
+    id: `tx-${date}-${sequence}`,
+    date,
+    memo,
+    debit: { accountId: "acct-food", amountMinor: Number(amountText), currency: "KRW", side: "debit" },
+    credit: { accountId: "acct-checking", amountMinor: Number(amountText), currency: "KRW", side: "credit" },
+  };
+}
+
+/*
+ * 순수 코어가 돌려준 커맨드를 인터프리터가 아는 이펙트 커맨드로 옮기는 자리입니다.
+ * appendTransaction을 파일에 적을 때 도메인 값 대신 방금 검증한 원시 값 rawInput을
+ * 이어 붙입니다. 파일에 저장하는 표현은 중첩된 amount가 아니라 평평한 원시 모양이고,
+ * 그 표현을 rawInput이 이미 갖고 있기 때문입니다.
+ *
+ * exit 커맨드는 process.exit을 바로 부르지 않고 process.exitCode만 정합니다. 그래야
+ * 남은 커맨드를 건너뛰지 않고 끝까지 실행한 뒤 종료됩니다.
+ */
+function runCoreCommand(
+  command: CoreCommand,
+  rawJournal: readonly RawTransaction[],
+  rawInput: RawTransaction,
+): void {
+  switch (command.kind) {
+    case "appendTransaction":
+      runCommand({
+        kind: "writeJournal",
+        path: JOURNAL_PATH,
+        content: `${JSON.stringify([...rawJournal, rawInput], null, 2)}\n`,
+      });
+      break;
+    case "printReport":
+      runCommand({ kind: "print", text: command.report });
+      break;
+    case "exit":
+      process.exitCode = command.code;
+      break;
+  }
+}
+
+/*
+ * 실행 순서가 이 함수 하나에 다 보입니다. 저널 읽기, 저널 파싱, 시계 읽기,
+ * 순수 코어 호출, 돌아온 커맨드 실행 순서입니다. 저널 파일이 깨져 있으면 결정을
+ * 내리기 전에 멈춥니다.
+ *
+ * 이 함수 안에는 fs도 Date도 console도 없습니다. 바깥세상과 닿는 일은 전부
+ * runCommand를 지나갑니다.
+ */
+function runAdd(args: readonly string[]): void {
+  const journalText = runCommand({ kind: "readJournal", path: JOURNAL_PATH }) as string;
+  const rawJournal = JSON.parse(journalText) as RawTransaction[];
+
+  const journal = parseJournal(rawJournal);
+  if (!journal.ok) {
+    runCommand({ kind: "print", text: `저널을 읽지 못했습니다: ${journal.error}` });
+    process.exitCode = 1;
+    return;
+  }
+
+  const now = runCommand({ kind: "readClock" }) as string;
+  const rawInput = toRawTransaction(args, now, rawJournal.length + 1);
+
+  for (const command of decide(journal.value, parseTransaction(rawInput))) {
+    runCoreCommand(command, rawJournal, rawInput);
+  }
+}
+
 function main(command: Command): void {
   switch (command.kind) {
     case "add":
-      console.log("add 명령은 아직 구현되지 않았습니다.");
-      console.log(`인자: ${command.args.join(", ")}`);
+      runAdd(command.args);
       break;
     case "report":
       console.log("report 명령은 아직 구현되지 않았습니다.");
@@ -80,10 +171,29 @@ main(parseCommand(process.argv.slice(2)));
  *
  * 실행 위치: projects/ledger
  *
- * $ node src/cli.ts add 100 groceries
- * add 명령은 아직 구현되지 않았습니다.
- * 인자: 100, groceries
+ * journal.json이 없는 상태에서 시작합니다. add 명령이 처음으로 실제 파일을 만듭니다.
+ *
+ * $ node src/cli.ts add 15000 점심
+ * 기록 완료. 누적 차변 합계: 15000
  * 종료 코드: 0
+ *
+ * 이 실행이 journal.json을 만들었습니다. 파일에는 원시 거래 하나가 들어 있고,
+ * id는 시계에서 얻은 날짜와 순번으로 만든 tx-2026-08-04-1입니다.
+ *
+ * 같은 명령을 한 번 더 실행하면, 이번에는 파일에 있던 거래를 먼저 읽어 들이므로
+ * 누적 차변 합계가 두 거래의 합으로 늘어납니다.
+ *
+ * $ node src/cli.ts add 15000 점심
+ * 기록 완료. 누적 차변 합계: 30000
+ * 종료 코드: 0
+ *
+ * 금액 자리에 숫자가 아닌 문자열을 넣으면 Number가 NaN을 만들고, makeMoney의 검사가
+ * 그 NaN을 거부합니다. 예외가 아니라 값으로 돌아온 실패가 printReport 커맨드와
+ * 종료 코드 1의 exit 커맨드로 바뀝니다. journal.json은 바뀌지 않습니다.
+ *
+ * $ node src/cli.ts add abc 점심
+ * 기록 실패: Money.amountMinor must be a non-negative integer (received NaN)
+ * 종료 코드: 1
  *
  * $ node src/cli.ts report
  * report 명령은 아직 구현되지 않았습니다.
@@ -102,35 +212,33 @@ main(parseCommand(process.argv.slice(2)));
  * (파일 경로는 실행하는 컴퓨터마다 다르므로 <저장소>로 줄여 적었습니다.)
  *
  * $ node src/cli.ts nonsense
- * file://<저장소>/projects/ledger/src/cli.ts:72
+ * file://<저장소>/projects/ledger/src/cli.ts:163
  *       throw new Error("알 수 없는 명령");
  *             ^
  *
  * Error: 알 수 없는 명령
- *     at main (file://<저장소>/projects/ledger/src/cli.ts:72:13)
- *     at file://<저장소>/projects/ledger/src/cli.ts:76:1
+ *     at main (file://<저장소>/projects/ledger/src/cli.ts:163:13)
+ *     at file://<저장소>/projects/ledger/src/cli.ts:167:1
  *     at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
- *     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:639:26)
+ *     at async node:internal/modules/esm/loader:639:26
  *     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
  *
  * Node.js v25.8.0
  * 종료 코드: 1
  *
  * $ node src/cli.ts
- * 위와 글자 하나 다르지 않은 오류가 같은 72번째 줄에서 납니다.
+ * 위와 글자 하나 다르지 않은 오류가 같은 163번째 줄에서 납니다.
  * 인자가 없으면 argv[0]이 undefined인데, 단언이 그것마저 Command["kind"]로
  * 통과시키기 때문입니다.
  * 종료 코드: 1
  *
- * 실행 위치: 저장소 루트
- *
- * $ npx tsc --noEmit
+ * $ npx tsc -p .
  * 출력 없음
  * 종료 코드: 0
  *
- * 실행 위치: projects/ledger
+ * 실행 위치: 저장소 루트
  *
- * $ npx tsc -p .
+ * $ npx tsc --noEmit
  * 출력 없음
  * 종료 코드: 0
  */

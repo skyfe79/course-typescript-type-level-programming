@@ -77,65 +77,48 @@ function runPrintCommand(cmd: PrintCommand): void {
 }
 
 /*
- * 아래 호출은 다음 스텝들에서 실제 CLI 배선으로 바뀔 임시 확인 코드입니다.
- * 실행 위치는 projects/ledger이고, journal.json은 그 폴더 기준 상대경로입니다.
+ * runCommand는 ledger의 모든 부수 효과가 지나가는 단 하나의 문입니다.
+ * readJournal과 writeJournal이 같은 case 묶음으로 내려가면 cmd는 두 갈래의
+ * 유니온으로 좁혀지고, 그래서 runFileCommand에 그대로 넘길 수 있습니다.
  *
- * 파일이 없는 첫 실행에서는 첫 출력이 []입니다. 그 다음 writeJournal이 파일을 만들고,
- * 두 번째 출력은 방금 쓴 저널 문자열이 됩니다. 이미 journal.json이 있으면 첫 출력은
- * []가 아니라 기존 파일 내용입니다.
+ * default의 never 대입은 cli.ts에서 이미 배운 완전성 검사와 같은 장치입니다.
+ * 나중에 커맨드 종류를 더하고 분기를 빠뜨리면, 타입 검사 단계에서 이 줄이
+ * 먼저 걸립니다.
  */
-const DEMO_JOURNAL_PATH = "journal.json";
+type EffectCommand = ReadJournalCommand | WriteJournalCommand | ReadClockCommand | PrintCommand;
 
-console.log(runFileCommand({ kind: "readJournal", path: DEMO_JOURNAL_PATH }));
+function runCommand(cmd: EffectCommand): string | void {
+  switch (cmd.kind) {
+    case "readJournal":
+    case "writeJournal":
+      return runFileCommand(cmd);
+    case "readClock":
+      return runClockCommand(cmd);
+    case "print":
+      return runPrintCommand(cmd);
+    default: {
+      const _exhaustive: never = cmd;
+      throw new Error("알 수 없는 커맨드");
+    }
+  }
+}
 
-runFileCommand({
-  kind: "writeJournal",
-  path: DEMO_JOURNAL_PATH,
-  content: `[
-  {"kind":"simple","id":"tx-file-1","date":"2026-08-04","memo":"간식",
-   "debit":{"accountId":"acct-food","amountMinor":2500,"currency":"KRW","side":"debit"},
-   "credit":{"accountId":"acct-checking","amountMinor":2500,"currency":"KRW","side":"credit"}}
-]
-`,
-});
+// 이 파일은 최상위 실행문을 두지 않으므로, import 되어도 아무 일도 일어나지 않습니다.
 
-console.log(runFileCommand({ kind: "readJournal", path: DEMO_JOURNAL_PATH }));
-
-/*
- * 아래 두 호출도 이번 스텝에서 시계와 표준출력 인터프리터를 눈으로 확인하기 위한
- * 임시 코드입니다. readClock 출력은 실행할 때마다 달라집니다.
- */
-console.log(runClockCommand({ kind: "readClock" }));
-
-runPrintCommand({ kind: "print", text: "인터프리터가 직접 찍은 줄입니다." });
+export type { EffectCommand, ReadJournalCommand, WriteJournalCommand, ReadClockCommand, PrintCommand };
+export { runCommand };
 
 /*
  * 실측 기록
  *
  * 실행 위치: projects/ledger
  *
- * journal.json이 아직 없는 상태에서 처음 실행한 결과입니다.
- *
  * $ node src/interpreter.ts
- * []
- * [
- *   {"kind":"simple","id":"tx-file-1","date":"2026-08-04","memo":"간식",
- *    "debit":{"accountId":"acct-food","amountMinor":2500,"currency":"KRW","side":"debit"},
- *    "credit":{"accountId":"acct-checking","amountMinor":2500,"currency":"KRW","side":"credit"}}
- * ]
- *
- * 2026-08-04T11:33:48.497Z
- * 인터프리터가 직접 찍은 줄입니다.
+ * 출력 없음
  * 종료 코드: 0
  *
- * 뒤의 두 줄이 이번 스텝에서 더한 시계와 표준출력입니다. ISO 시각은 실행할 때마다
- * 달라지므로 위 값은 실측한 그 순간의 값입니다.
- *
- * 첫 줄 []는 파일이 없을 때 runFileCommand가 돌려주는 대체값입니다. 그다음
- * writeJournal이 journal.json을 실제로 만들었고, 두 번째 출력은 그 파일을 다시 읽은
- * 내용입니다. 마지막 빈 줄은 파일 내용이 줄바꿈으로 끝나기 때문에 생깁니다.
- * 같은 명령을 한 번 더 실행하면 파일이 이미 있으므로 첫 출력도 []가 아니라
- * 저널 내용이 됩니다.
+ * 최상위 실행문이 없으므로 직접 실행해도 아무것도 출력하지 않습니다. 이 파일이
+ * 실제로 무엇을 하는지는 cli.ts가 add 명령을 처리할 때 드러납니다.
  *
  * $ npx tsc -p .
  * 출력 없음

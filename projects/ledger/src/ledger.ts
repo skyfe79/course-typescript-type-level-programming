@@ -26,6 +26,18 @@
  */
 
 /*
+ * import.meta.main은 이 파일이 직접 실행된 진입점일 때만 true입니다.
+ * 그래서 node src/ledger.ts로 직접 돌리면 지금까지와 똑같이 전부 출력되고,
+ * 다른 파일이 이 파일을 import 하면 조용합니다. 지금부터 이 파일은 CLI가
+ * 가져다 쓰는 모듈이기도 하므로, 데모 출력과 모듈 import를 구분해야 합니다.
+ */
+const isDirectRun = import.meta.main;
+
+function demo(...values: readonly unknown[]): void {
+  if (isDirectRun) console.log(...values);
+}
+
+/*
  * AccountId는 문자열처럼 출력하고 비교할 수 있지만, 아무 문자열이나 계좌
  * 식별자로 받을 수는 없도록 브랜드를 붙입니다.
  */
@@ -108,7 +120,7 @@ function sameMoney(a: Money, b: Money): boolean {
 const price1: Money = makeMoney(15000, "KRW");
 const price2: Money = makeMoney(15000, "KRW");
 
-console.log(sameMoney(price1, price2));
+demo(sameMoney(price1, price2));
 
 /*
  * 여기부터는 엔티티입니다.
@@ -162,32 +174,32 @@ const checkingAfter: Account = {
   balance: makeMoney(485000, "KRW"),
 };
 
-console.log(sameAccount(checkingBefore, checkingAfter));
-console.log(sameMoney(checkingBefore.balance, checkingAfter.balance));
+demo(sameAccount(checkingBefore, checkingAfter));
+demo(sameMoney(checkingBefore.balance, checkingAfter.balance));
 
 function describeAccountId(id: AccountId): string {
   return `계좌 ${id}`;
 }
 
 const checkingId = makeAccountId("acct-checking");
-console.log(describeAccountId(checkingId));
+demo(describeAccountId(checkingId));
 
 // @ts-expect-error - 순수 string은 AccountId 브랜드가 없어 바로 넘길 수 없다
 describeAccountId("acct-checking");
 
 const lunchPrice = makeMoney(15000, "KRW");
-console.log(lunchPrice.amountMinor, lunchPrice.currency);
+demo(lunchPrice.amountMinor, lunchPrice.currency);
 
 // @ts-expect-error - 브랜드 없는 평범한 객체 리터럴은 Money 자리에 들어갈 수 없다
 const rawPrice: Money = { amountMinor: 15000, currency: "KRW" };
 
 const postedOn = makeIsoDate("2026-08-02");
-console.log(postedOn);
+demo(postedOn);
 
 try {
   makeIsoDate("08/02/2026");
 } catch (err) {
-  console.log((err as Error).message);
+  demo((err as Error).message);
 }
 
 /*
@@ -279,7 +291,7 @@ const lunch = makeSimpleTransaction(
   { accountId: makeAccountId("acct-food"), amount: makeMoney(15000, "KRW"), side: "debit" },
   { accountId: makeAccountId("acct-checking"), amount: makeMoney(15000, "KRW"), side: "credit" },
 );
-console.log(lunch.kind, lunch.debit.amount.amountMinor);
+demo(lunch.kind, lunch.debit.amount.amountMinor);
 
 try {
   makeSimpleTransaction(
@@ -291,7 +303,7 @@ try {
   );
 } catch (err) {
   // tx-bad의 try/catch는 불균형 거래가 애초에 값으로 존재할 수 없음을 실행으로 보여줍니다.
-  console.log((err as Error).message);
+  demo((err as Error).message);
 }
 
 function describeTransaction(tx: Transaction): string {
@@ -324,8 +336,8 @@ const groceries = makeSplitTransaction(
   [{ accountId: makeAccountId("acct-checking"), amount: makeMoney(42000, "KRW"), side: "credit" }],
 );
 
-console.log(describeTransaction(lunch));
-console.log(describeTransaction(groceries));
+demo(describeTransaction(lunch));
+demo(describeTransaction(groceries));
 
 /*
  * 여기부터는 JSON 저널 파일에서 읽어 온 원시 값을 도메인 값으로 파싱하는 구역입니다.
@@ -382,8 +394,8 @@ function parseEntryLine(raw: RawEntryLine): Result<EntryLine> {
 /*
  * 형태가 맞는 값은 ok: true 결과로, amountMinor가 빠진 값은 ok: false 결과로 갈립니다.
  */
-console.log(parseEntryLine({ accountId: "acct-food", amountMinor: 15000, currency: "KRW", side: "debit" }));
-console.log(parseEntryLine({ accountId: "acct-food", currency: "KRW", side: "debit" }));
+demo(parseEntryLine({ accountId: "acct-food", amountMinor: 15000, currency: "KRW", side: "debit" }));
+demo(parseEntryLine({ accountId: "acct-food", currency: "KRW", side: "debit" }));
 
 /*
  * 거래 하나 분량의 원시 JSON도 아직 아무것도 보장되지 않습니다.
@@ -438,7 +450,7 @@ function parseTransaction(raw: RawTransaction): Result<Transaction> {
  * 금액이 어긋난 원시 거래는 지난 화의 균형 검사가 낸 오류 메시지를 ok: false에
  * 담습니다. 두 경우 모두 예외가 아니라 값으로 전달됩니다.
  */
-console.log(
+demo(
   parseTransaction({
     kind: "simple",
     id: "tx-3",
@@ -449,7 +461,7 @@ console.log(
   }),
 );
 
-console.log(
+demo(
   parseTransaction({
     kind: "simple",
     id: "tx-bad-2",
@@ -501,17 +513,17 @@ const journalJson = `[
  */
 const journalResult = parseJournal(JSON.parse(journalJson));
 if (journalResult.ok) {
-  console.log(`loaded ${journalResult.value.length} transactions`);
+  demo(`loaded ${journalResult.value.length} transactions`);
 } else {
-  console.log(`parse failed: ${journalResult.error}`);
+  demo(`parse failed: ${journalResult.error}`);
 }
 
 /*
  * Command는 이펙트를 직접 일으키는 대신 이펙트를 값으로 나타낸 타입입니다.
  * appendTransaction은 저널에 거래를 추가하라는 뜻이고, printReport는 문자열 하나를
  * 표준출력에 찍으라는 뜻이며, exit은 주어진 종료 코드로 끝내라는 뜻입니다.
- * 다만 이 값들은 아직 아무 일도 하지 않습니다. 실제로 실행하는 인터프리터는
- * 다음 화에서 만듭니다.
+ * 다만 이 값들은 아직 아무 일도 하지 않습니다. 실제 실행은 interpreter.ts가
+ * 맡습니다.
  *
  * appendTransaction 갈래는 Transaction을 그대로 안고 있으므로, 지금까지 쌓아 온
  * 도메인 타입 위에 커맨드를 그대로 얹을 수 있습니다.
@@ -521,8 +533,8 @@ if (journalResult.ok) {
  *
  * 같은 프로젝트의 projects/ledger/src/cli.ts에도 Command라는 타입이 따로 있지만,
  * 그것은 명령행 표면(argv)을 나타내는 타입이고 이 파일의 Command는 이펙트를
- * 나타내는 커맨드입니다. ledger.ts는 export {}; 때문에 모듈이므로 두 선언은
- * 서로 충돌하지 않습니다.
+ * 나타내는 커맨드입니다. 이제 두 파일 모두 import나 export를 가진 모듈이므로,
+ * 두 Command는 각자 자기 모듈 안에 있어 이름이 겹쳐도 서로 간섭하지 않습니다.
  */
 type Command =
   | { readonly kind: "appendTransaction"; readonly transaction: Transaction }
@@ -573,7 +585,7 @@ function decide(existing: readonly Transaction[], input: Result<Transaction>): r
  * 만들어 decide에 넣고 돌아온 배열을 그대로 읽으면, 코어가 무엇을 하려 했는지
  * 전부 드러납니다.
  *
- * 여기서 console.log는 이펙트를 실행하려고 쓰는 것이 아닙니다. decide가 돌려준
+ * 여기서 demo는 이펙트를 실행하려고 쓰는 것이 아닙니다. decide가 돌려준
  * 계획을 눈으로 확인하려고 쓸 뿐입니다. printReport 커맨드 안의 문자열은 아직
  * 화면에 찍히지 않았고, 배열 원소로 들어 있을 뿐입니다.
  *
@@ -593,10 +605,11 @@ const goodInput = parseTransaction({
 
 const badInput: Result<Transaction> = { ok: false, error: "테스트용 실패" };
 
-console.log(decide(noExisting, goodInput));
-console.log(decide(noExisting, badInput));
+demo(decide(noExisting, goodInput));
+demo(decide(noExisting, badInput));
 
-export {};
+export type { Command, Transaction, RawTransaction, Result };
+export { decide, parseJournal, parseTransaction };
 
 /*
  * 실측 기록
@@ -685,15 +698,13 @@ export {};
  * 값으로 전달됩니다. loaded 2 transactions 줄은 원시 JSON 배열 하나가 parseJournal을 지나
  * 두 개의 검증된 Transaction 값으로 이어졌음을 보여줍니다. 그다음 두 배열 출력은
  * decide의 성공 경로와 실패 경로가 각각 돌려준 커맨드 목록입니다. 파일을 만들거나
- * 화면에 결과를 찍는 실제 동작은 아직 일어나지 않았습니다.
+ * 화면에 결과를 찍는 실제 동작은 이 파일에서 일어나지 않습니다.
+ *
+ * 위 출력은 이 파일을 직접 실행했을 때만 나옵니다. cli.ts처럼 다른 파일이 이 파일을
+ * import 하면 demo가 조용해지므로, CLI 출력 앞에 이 데모가 섞이지 않습니다.
  *
  * $ npx tsc -p .
  * 출력 없음
- * 종료 코드: 0
- *
- * $ node src/cli.ts add 100 groceries
- * add 명령은 아직 구현되지 않았습니다.
- * 인자: 100, groceries
  * 종료 코드: 0
  *
  * 실행 위치: 저장소 루트
