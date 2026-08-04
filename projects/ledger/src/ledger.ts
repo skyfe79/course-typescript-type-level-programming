@@ -460,6 +460,52 @@ console.log(
   }),
 );
 
+/*
+ * 저널은 거래가 여러 개 들어 있는 배열입니다. 먼저 배열인지 확인하고,
+ * 각 원소를 순서대로 parseTransaction에 넘깁니다. 첫 실패를 만나면 그
+ * 자리에서 실패 결과를 그대로 돌려주는 단락 구조입니다. 그래서 성공 갈래로
+ * 빠져나온 시점에는 다시 검증해야 할 지점이 남지 않습니다.
+ */
+function parseJournal(raw: unknown): Result<readonly Transaction[]> {
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "journal must be a JSON array of transactions" };
+  }
+
+  const transactions: Transaction[] = [];
+  for (const entry of raw) {
+    const result = parseTransaction(entry as RawTransaction);
+    if (!result.ok) return result;
+    transactions.push(result.value);
+  }
+
+  return { ok: true, value: transactions };
+}
+
+/*
+ * 실제로는 파일에서 읽어 올 저널 내용을, 여기서는 문자열 하나로 대신 둡니다.
+ * 파일 입출력은 이 화의 범위가 아니므로 파싱의 입구만 같은 모양으로 맞춥니다.
+ */
+const journalJson = `[
+  {"kind":"simple","id":"tx-1","date":"2026-08-01","memo":"점심",
+   "debit":{"accountId":"acct-food","amountMinor":15000,"currency":"KRW","side":"debit"},
+   "credit":{"accountId":"acct-checking","amountMinor":15000,"currency":"KRW","side":"credit"}},
+  {"kind":"simple","id":"tx-3","date":"2026-08-02","memo":"커피",
+   "debit":{"accountId":"acct-food","amountMinor":4500,"currency":"KRW","side":"debit"},
+   "credit":{"accountId":"acct-checking","amountMinor":4500,"currency":"KRW","side":"credit"}}
+]`;
+
+/*
+ * JSON.parse는 any를 돌려주므로 그 자체로는 아무것도 보장하지 않습니다. 그래서
+ * parseJournal의 매개변수를 unknown으로 받아, 형태 확인을 파서 안에서 하게 둡니다.
+ * 원시 JSON 문자열 하나가 한 번의 파싱으로 검증된 Transaction[]까지 이어집니다.
+ */
+const journalResult = parseJournal(JSON.parse(journalJson));
+if (journalResult.ok) {
+  console.log(`loaded ${journalResult.value.length} transactions`);
+} else {
+  console.log(`parse failed: ${journalResult.error}`);
+}
+
 export {};
 
 /*
@@ -506,6 +552,7 @@ export {};
  *   ok: false,
  *   error: 'Unbalanced transaction tx-bad-2: debit 4500 != credit 4000'
  * }
+ * loaded 2 transactions
  * 종료 코드: 0
  *
  * 첫 줄은 값 객체의 값 비교입니다. price1과 price2는 별개의 객체인데도 true입니다.
@@ -524,9 +571,10 @@ export {};
  * 출력되며, 차변 두 줄과 대변 한 줄을 유니온 좁히기 뒤에 읽을 수 있음을 보여줍니다.
  * 이어지는 두 객체 출력은 parseEntryLine의 결과입니다. 필드가 모두 맞는 원시 값은 ok: true로
  * EntryLine까지 조립되고, amountMinor가 빠진 원시 값은 ok: false와 오류 문자열로 남습니다.
- * 이번에 늘어난 두 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
+ * 그다음 두 객체 출력은 parseTransaction의 결과입니다. 균형이 맞는 tx-3은 ok: true
  * Transaction으로 조립되고, 금액이 어긋난 tx-bad-2는 균형 검사 오류 메시지를 담은 ok: false
- * 값으로 전달됩니다.
+ * 값으로 전달됩니다. 마지막 줄은 원시 JSON 배열 하나가 parseJournal을 지나 두 개의
+ * 검증된 Transaction 값으로 이어졌음을 보여줍니다.
  *
  * $ npx tsc -p .
  * 출력 없음
