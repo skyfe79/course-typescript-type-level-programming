@@ -180,6 +180,84 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
   }
 }
 
+// codeStep 430 — pipeline의 인자를 최소 한 개 이상의 스테이지를 담는 가변 인자 튜플로 받는다.
+// 배열 타입으로 뭉개지지 않으므로 Stages는 [InvertStage, GrayscaleStage]처럼
+// 호출 위치마다 각 원소의 타입과 순서를 그대로 보존해 추론된다.
+function pipeline<Stages extends readonly [AnyStage, ...AnyStage[]]>(
+  ...stages: Stages
+): PipelineResult<Stages> {
+  const first = stages[0];
+  const last = stages[stages.length - 1];
+  // 런타임에서는 첫 입력과 마지막 출력이 분명하지만, 컴파일러는 이 객체가 재귀 조건부 타입의
+  // 성공 분기를 만족한다는 사실까지 구조적으로 증명할 수 없다. 구현 경계에서 그 간극만 단언한다.
+  return { in: first.in, out: last.out } as PipelineResult<Stages>;
+}
+
+// Stages는 [InvertStage, GrayscaleStage] 튜플로 추론된다.
+const previewPipeline = pipeline(invertStage(), grayscaleStage());
+
+// plan은 readonly AnyStage[]라서 원소별 위치 정보와 "최소 한 개"라는 보장을 잃었다.
+// 호출하지 않는 데모 안에 두어 런타임에는 영향을 주지 않되, 배열 spread의 실패는 계속 검사한다.
+function spreadPlanArrayDemo(): void {
+  // @ts-expect-error — TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+  pipeline(...plan);
+}
+
+// codeStep 432 — 불일치를 never로 지우지 않고, 기대 포맷과 실패한 스테이지의 이름을 타입에 남긴다.
+// 바로 아래 CheckAdjacent가 이 타입을 돌려주므로, 읽는 순서를 위해 codeStep 431보다 앞에 두었다.
+// never는 "무언가 잘못됐다"는 것만 말하고 무엇이 잘못됐는지는 지워 버린다.
+interface PipelineMismatch<Expected extends PixelFormat, Failing extends AnyStage> {
+  readonly error: "PIPELINE_FORMAT_MISMATCH";
+  readonly expectedFormat: Expected;
+  readonly failingStage: Failing["kind"];
+}
+
+// codeStep 431 — 튜플의 머리와 꼬리를 분리하며 인접한 스테이지의 포맷을 차례로 검사한다.
+// Head의 입력이 지금까지 누적한 포맷 Acc와 맞으면, Head의 출력을 새 Acc로 삼아 Tail을 계속 훑는다.
+// 튜플이 비면 더 검사할 인접 쌍이 없으므로 그 시점의 Acc가 곧 파이프라인 전체의 출력 포맷이다.
+type CheckAdjacent<Stages extends readonly AnyStage[], Acc extends PixelFormat> =
+  Stages extends readonly [infer Head extends AnyStage, ...infer Tail extends AnyStage[]]
+    ? Head["in"] extends Acc
+      ? CheckAdjacent<Tail, Head["out"]>
+      : PipelineMismatch<Acc, Head>
+    : Acc;
+
+// GoodResult는 모든 인접 관계를 통과한 뒤 마지막 출력인 "Gray8"이 된다.
+type GoodResult = CheckAdjacent<[InvertStage, GrayscaleStage], "RGBA8">;
+
+// BadResult의 호버는 인터페이스 이름을 보존해 PipelineMismatch<"Gray8", BrightnessStage>로 표시된다.
+// 구조를 펼친 객체 모양이 아니라 이름과 타입 인자가 그대로 남는다는 것이 이 타입의 값이다 —
+// 기대한 포맷("Gray8")과 그것을 받지 못한 스테이지(BrightnessStage)가 진단에 그대로 실린다.
+type BadResult = CheckAdjacent<[GrayscaleStage, BrightnessStage], "RGBA8">;
+
+// codeStep 433 — 첫 입력에서 검사를 시작해 성공하면 전체 입출력을, 실패하면 오류 타입을 돌려준다.
+type PipelineResult<Stages extends readonly [AnyStage, ...AnyStage[]]> =
+  CheckAdjacent<Stages, Stages[0]["in"]> extends PixelFormat
+    ? {
+        readonly in: Stages[0]["in"];
+        readonly out: CheckAdjacent<Stages, Stages[0]["in"]>;
+      }
+    : CheckAdjacent<Stages, Stages[0]["in"]>;
+
+interface RunnablePipeline<In extends PixelFormat, Out extends PixelFormat> {
+  readonly in: In;
+  readonly out: Out;
+}
+
+// run은 구체적인 스테이지 목록을 알 필요 없이, 검사를 통과해 in과 out을 가진 결과만 받는다.
+function run<In extends PixelFormat, Out extends PixelFormat>(
+  p: RunnablePipeline<In, Out>,
+): void {
+  console.log(`파이프라인: ${p.in} -> ${p.out}`);
+}
+
+// 잘못 연결한 체인의 진단도 컴파일되는 교육용 증거로 남기되, 호출하지 않아 출력은 더럽히지 않는다.
+function brokenPipelineDemo(): void {
+  // TS2739: Type 'PipelineMismatch<"Gray8", BrightnessStage>' is missing the following properties from type 'RunnablePipeline<PixelFormat, PixelFormat>': in, out
+  // @ts-expect-error — 포맷이 어긋난 결과에는 RunnablePipeline이 요구하는 in과 out이 없다.
+  run(pipeline(grayscaleStage(), brightnessStage(20)));
+}
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -210,6 +288,7 @@ function main(): void {
   console.log(
     `describe with flip ${[...plan, flipStage()].map(describeStageWithFlip).join(" · ")}`,
   );
+  run(pipeline(invertStage(), grayscaleStage()));
 
   const decoded = readPng(INPUT_URL);
 
