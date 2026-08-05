@@ -102,13 +102,19 @@ interface ThresholdStage extends PixelStage<"threshold", "RGBA8", "RGBA8"> {
   readonly level: number;
 }
 
+// codeStep 438 — 채도 효과의 세기는 factor에 남겨 실행 전에도 계획을 설명할 수 있게 한다.
+interface SaturateStage extends PixelStage<"saturate", "RGBA8", "RGBA8"> {
+  readonly factor: number;
+}
+
 // 모든 스테이지를 하나의 판별 유니온으로 모으면 kind를 확인할 때 나머지 필드도 함께 좁혀진다.
 type AnyStage =
   | InvertStage
   | GrayscaleStage
   | BrightnessStage
   | ContrastStage
-  | ThresholdStage;
+  | ThresholdStage
+  | SaturateStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
@@ -162,6 +168,17 @@ function thresholdStage(level: number): ThresholdStage {
   };
 }
 
+// codeStep 438 — 채도 스테이지는 factor를 품고 같은 mapPixels를 재사용한다.
+function saturateStage(factor: number): SaturateStage {
+  return {
+    kind: "saturate",
+    factor,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", saturateKernel(factor)),
+  };
+}
+
 // 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
 const plan: readonly AnyStage[] = [invertStage(), brightnessStage(20), grayscaleStage()];
 
@@ -179,6 +196,9 @@ function describeStage(stage: AnyStage): string {
     // codeStep 437 — AnyStage에 넣은 새 종류도 처리해 소진 검사를 다시 만족시킨다.
     case "threshold":
       return `임계값 ${stage.level}`;
+    // codeStep 438 — 채도도 factor까지 읽어 계획을 설명한다.
+    case "saturate":
+      return `채도 ${stage.factor}`;
     default: {
       // 모든 case를 처리했다면 이 지점의 stage에는 가능한 값이 없어 never로 좁혀진다.
       const exhaustive: never = stage;
@@ -211,6 +231,9 @@ function describeStageMissingFlip(stage: AnyStageWithFlip): string {
     // codeStep 437 — 여기서 빠뜨리는 종류는 계속 flip 하나뿐이어야 한다.
     case "threshold":
       return `임계값 ${stage.level}`;
+    // codeStep 438 — saturate까지 처리해야 default에 FlipStage만 남는다.
+    case "saturate":
+      return `채도 ${stage.factor}`;
     default: {
       // flip을 처리하지 않았으므로 여기의 stage는 FlipStage로 남아 never에 대입할 수 없다.
       // @ts-expect-error — flip을 처리하지 않아 stage가 FlipStage로 남는다
@@ -234,6 +257,9 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
     // codeStep 437 — flip을 포함한 실행기도 임계값 스테이지를 빠짐없이 설명한다.
     case "threshold":
       return `임계값 ${stage.level}`;
+    // codeStep 438 — 모든 종류를 처리해야 default가 다시 never로 좁혀진다.
+    case "saturate":
+      return `채도 ${stage.factor}`;
     case "flip":
       return "뒤집기";
     default: {
@@ -415,6 +441,19 @@ const thresholdKernel = (level: number): PixelKernel<"RGBA8", "RGBA8"> =>
     return [channel, channel, channel, a];
   };
 
+// codeStep 438 — 원래 채널과 회색 사이의 거리를 factor만큼 벌려 채도를 조절한다.
+// factor 0은 그레이스케일, 1은 원본, 1보다 크면 색 차이가 더 벌어져 색이 진해진다.
+const saturateKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => {
+    const gray = luma(r, g, b);
+    return [
+      gray + (r - gray) * factor,
+      gray + (g - gray) * factor,
+      gray + (b - gray) * factor,
+      a,
+    ];
+  };
+
 // codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
 function clampingContrast(): string {
   const clamped = new Uint8ClampedArray(2);
@@ -506,6 +545,11 @@ function main(): void {
   // codeStep 437 — 밝기가 약 152인 같은 픽셀이 기준 128에서는 흰색, 200에서는 검은색이 된다.
   console.log(`임계값 128 픽셀 ${Array.from(thresholdStage(128).run(samplePixel).data)}`);
   console.log(`임계값 200 픽셀 ${Array.from(thresholdStage(200).run(samplePixel).data)}`);
+
+  // codeStep 438 — 채도 0의 세 채널은 위 그레이스케일 픽셀의 채널 값과 같아진다.
+  console.log(`채도 0 픽셀 ${Array.from(saturateStage(0).run(samplePixel).data)}`);
+  console.log(`채도 1 픽셀 ${Array.from(saturateStage(1).run(samplePixel).data)}`);
+  console.log(`채도 1.8 픽셀 ${Array.from(saturateStage(1.8).run(samplePixel).data)}`);
 
   // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
   // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
