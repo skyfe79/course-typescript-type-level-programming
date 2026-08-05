@@ -1,7 +1,7 @@
 // 토큰 배열 위를 한 번만 앞으로 이동하면서, 연산자 우선순위가 드러나는 식 트리를 만든다.
 
-import type { Expr } from "./ast.ts";
-import type { Operator, Punct, Token, TokenKind } from "./tokens.ts";
+import type { Block, Expr, IfStatement, Statement, TypeName } from "./ast.ts";
+import type { Keyword, Operator, Punct, Token, TokenKind } from "./tokens.ts";
 
 // 파서마다 자기 커서를 갖게 하면 서로 다른 토큰 배열을 파싱하는 작업이 전역 상태를
 // 공유하지 않는다. 다음 화에서 문 파싱 함수와 진단 수집 상태가 늘어나더라도 모두 이
@@ -13,6 +13,14 @@ export function createParser(tokens: readonly Token[]) {
   // 마지막 eof를 계속 돌려주면 각 파싱 함수에서 배열 범위를 거듭 검사하지 않아도 된다.
   function peek(): Token {
     return tokens[Math.min(current, tokens.length - 1)];
+  }
+
+  // 대입문과 식 문은 모두 식별자로 시작할 수 있다. 예를 들어 `x = 1;`과
+  // `x + 1;`은 첫 토큰만 보고는 구분할 수 없으므로, 현재 토큰을 소비하지 않은 채
+  // 바로 다음 토큰까지 미리 본다. peek과 마찬가지로 배열 끝에서는 마지막 eof에
+  // 인덱스를 고정해, 짧은 입력에서도 범위를 벗어나지 않게 한다.
+  function peekNext(): Token {
+    return tokens[Math.min(current + 1, tokens.length - 1)];
   }
 
   // advance가 커서를 옮긴 직후 소비한 토큰을 다시 확인할 때 쓴다. 첫 토큰을 소비하기
@@ -40,6 +48,18 @@ export function createParser(tokens: readonly Token[]) {
     return peek().kind === kind;
   }
 
+  // kind만 확인하는 check로는 `if`와 `while`, `}`와 `;`를 서로 구별할 수 없다.
+  // 문법을 소비하기 전에 구체적인 키워드와 구두점을 미리 볼 수 있게 값까지 비교한다.
+  function checkKeyword(word: Keyword): boolean {
+    const token = peek();
+    return token.kind === "keyword" && token.word === word;
+  }
+
+  function checkPunct(char: Punct): boolean {
+    const token = peek();
+    return token.kind === "punct" && token.char === char;
+  }
+
   // boolean을 돌려준 뒤 previous()를 읽는 방식은 previous()의 타입을 넓은 Token
   // 유니온으로 되돌린다. 그러면 토큰의 op를 읽기 위해 다시 좁히거나 단언해야 한다.
   // 대신 실제로 찾은 O를 반환하면 호출 위치에서 "+" | "-" 같은 좁은 타입이 그대로
@@ -49,6 +69,19 @@ export function createParser(tokens: readonly Token[]) {
     if (token.kind !== "operator") return undefined;
 
     const found = candidates.find((candidate) => candidate === token.op);
+    if (found === undefined) return undefined;
+
+    advance();
+    return found;
+  }
+
+  // matchOperator와 똑같이, 찾은 키워드 자체를 반환해 K의 좁은 타입을 호출자까지
+  // 운반한다. boolean만 반환하고 previous()를 읽는 방식과 달리 타입 단언이 필요 없다.
+  function matchKeyword<K extends Keyword>(...candidates: readonly K[]): K | undefined {
+    const token = peek();
+    if (token.kind !== "keyword") return undefined;
+
+    const found = candidates.find((candidate) => candidate === token.word);
     if (found === undefined) return undefined;
 
     advance();
@@ -66,6 +99,26 @@ export function createParser(tokens: readonly Token[]) {
     return true;
   }
 
+  // matchKeyword는 있으면 소비하고 알려 주며, expectKeyword는 반드시 있어야 하는 경계를 확인한다.
+  function expectKeyword(word: Keyword): Token {
+    const token = peek();
+    if (token.kind === "keyword" && token.word === word) {
+      return advance();
+    }
+
+    throw new Error(`'${word}' 키워드가 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+  }
+
+  // matchOperator는 있으면 소비하고 알려 주며, expectOperator는 반드시 있어야 하는 경계를 확인한다.
+  function expectOperator(op: Operator): Token {
+    const token = peek();
+    if (token.kind === "operator" && token.op === op) {
+      return advance();
+    }
+
+    throw new Error(`'${op}' 연산자가 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+  }
+
   function expectPunct(char: Punct): Token {
     const token = peek();
     if (token.kind === "punct" && token.char === char) {
@@ -76,6 +129,34 @@ export function createParser(tokens: readonly Token[]) {
     // (ep_209, codeStep 467)에서는 예외를 던지는 대신 ParseResult와 Diagnostic 값에
     // 현재 위치를 담아, 호출자가 파싱 오류를 데이터로 다룰 수 있게 바꾼다.
     throw new Error(`'${char}' 구두점이 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+  }
+
+  function expectIdentifier(): string {
+    const token = peek();
+    if (token.kind === "identifier") {
+      // advance()의 반환 타입은 다시 넓은 Token이다. 이름은 kind 검사로 이미 좁혀진
+      // token에서 읽고, advance는 커서를 옮기는 용도로만 써서 단언을 피한다.
+      advance();
+      return token.name;
+    }
+
+    throw new Error(`식별자가 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+  }
+
+  function parseTypeAnnotation(): TypeName {
+    const token = peek();
+    if (
+      token.kind === "identifier"
+      && (token.name === "number" || token.name === "string" || token.name === "boolean")
+    ) {
+      advance();
+      // 문자열 비교가 token.name을 TypeName의 세 리터럴 중 하나로 좁혀 준다.
+      return token.name;
+    }
+
+    throw new Error(
+      `타입 이름(number, string, boolean)이 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`,
+    );
   }
 
   // 괄호 안에서는 바깥에서 내려오던 우선순위를 이어 가지 않고 가장 낮은 or부터
@@ -231,6 +312,97 @@ export function createParser(tokens: readonly Token[]) {
     );
   }
 
+  function parseStatement(): Statement {
+    if (checkPunct("{")) return parseBlock();
+    if (checkKeyword("if")) return parseIfStatement();
+    if (checkKeyword("while")) return parseWhileStatement();
+    if (checkKeyword("let")) return parseVarDecl();
+    if (checkKeyword("return")) return parseReturnStatement();
+
+    const token = peek();
+    const next = peekNext();
+    if (token.kind === "identifier" && next.kind === "operator" && next.op === "=") {
+      return parseAssignment();
+    }
+
+    const expression = parseExpression();
+    expectPunct(";");
+    return { kind: "exprStatement", expression };
+  }
+
+  function parseBlock(): Block {
+    expectPunct("{");
+    const statements: Statement[] = [];
+
+    // eof 검사 없이 `}`만 기다리면 닫는 중괄호가 빠진 입력에서 같은 eof를 보며
+    // 반복할 수 있다. 입력 끝에서는 반복을 멈추고 아래 expectPunct가 위치를 담은
+    // 예외를 만들게 한다.
+    while (!checkPunct("}") && !isAtEnd()) {
+      statements.push(parseStatement());
+    }
+
+    expectPunct("}");
+    return { kind: "block", statements };
+  }
+
+  function parseIfStatement(): IfStatement {
+    expectKeyword("if");
+
+    expectPunct("(");
+    const condition = parseExpression();
+    expectPunct(")");
+    const thenBranch = parseBlock();
+
+    let elseBranch: Block | IfStatement | null = null;
+    if (matchKeyword("else") !== undefined) {
+      // else 다음이 if라면 parseIfStatement가 그 키워드부터 다시 소비한다. 그래서
+      // elseBranch가 Block뿐 아니라 IfStatement도 허용하며, 체인이 AST에 그대로 남는다.
+      elseBranch = checkKeyword("if") ? parseIfStatement() : parseBlock();
+    }
+
+    return { kind: "if", condition, thenBranch, elseBranch };
+  }
+
+  function parseWhileStatement(): Statement {
+    expectKeyword("while");
+
+    expectPunct("(");
+    const condition = parseExpression();
+    expectPunct(")");
+    const body = parseBlock();
+    return { kind: "while", condition, body };
+  }
+
+  function parseVarDecl(): Statement {
+    expectKeyword("let");
+
+    const name = expectIdentifier();
+    expectPunct(":");
+    const declaredType = parseTypeAnnotation();
+    expectOperator("=");
+
+    const initializer = parseExpression();
+    expectPunct(";");
+    return { kind: "varDecl", name, declaredType, initializer };
+  }
+
+  function parseAssignment(): Statement {
+    const name = expectIdentifier();
+    expectOperator("=");
+
+    const value = parseExpression();
+    expectPunct(";");
+    return { kind: "assignment", name, value };
+  }
+
+  function parseReturnStatement(): Statement {
+    expectKeyword("return");
+
+    const value = parseExpression();
+    expectPunct(";");
+    return { kind: "return", value };
+  }
+
   // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
   // 들어오고, 개별 우선순위 함수도 교육용 관찰 스크립트에서 계속 확인할 수 있다.
   return {
@@ -243,5 +415,9 @@ export function createParser(tokens: readonly Token[]) {
     parseMultiplicative,
     parseUnary,
     parsePrimary,
+    parseStatement,
+    parseBlock,
+    parseIfStatement,
+    parseWhileStatement,
   };
 }
