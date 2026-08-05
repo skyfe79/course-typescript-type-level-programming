@@ -68,4 +68,42 @@ function tryToAssignConnectedAsDisconnected(): void {
   //       Type '"connected"' is not assignable to type '"disconnected"'.
 }
 
+// codeStep 391 — 전이 메서드와 완전성 질문
+
+// connect는 Disconnected 상태에서만 꺼내 쓸 수 있는 전이 메서드다.
+// 현재 객체를 바꾸는 대신 다음 상태인 Connection<Connected>를 반환 타입으로 약속한다.
+interface DisconnectedConnection extends Connection<Disconnected> {
+  connect(): Connection<Connected>;
+}
+
+// 팩토리가 처음 돌려주는 값은 언제나 연결 전 상태다.
+function createConnection(): DisconnectedConnection {
+  return {
+    connect() {
+      console.log("connect(): Connection<Connected> 타입의 값을 새로 돌려준다");
+      // __state는 선택적인 팬텀 필드라서 런타임 객체에 상태 값을 넣을 필요가 없다.
+      return {};
+    },
+  };
+}
+
+// 반환값을 이어 받으면 호출 순서가 값의 흐름과 타입의 흐름에 함께 나타난다.
+const disconnectedConnection = createConnection();
+const connectedConnection = disconnectedConnection.connect();
+
+// connect()가 반환한 값의 타입은 다음 상태인 Connection<Connected>로 정확히 고정된다.
+const connectReturnsConnected: Eq<typeof connectedConnection, Connection<Connected>> = true;
+
+// 모든 상태 중 현재 전이 메서드를 하나라도 가진 상태만 따로 모은다.
+type ConnectionState = Disconnected | Connected;
+type StatesWithTransition = Disconnected;
+
+// 전체 상태에서 나갈 전이가 있는 상태를 빼면, 현재 프로토콜에서 갇힌 상태가 계산된다.
+type StuckStates = Exclude<ConnectionState, StatesWithTransition>;
+// 지금은 Connected가 그대로 남지만, 다음 화에서는 send와 disconnect 전이로 이 빈자리를 채운다.
+const connectedHasNoWayOut: Eq<StuckStates, Connected> = true;
+
+// 이는 판별 유니온의 완전성 검사와 같은 질문이다.
+// 처리되지 않은 경우가 모두 사라져 never가 되는지 묻듯, 완성된 상태 머신이라면 StuckStates도 never여야 한다.
+
 export {};
