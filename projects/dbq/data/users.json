@@ -1,0 +1,32 @@
+[
+  {
+    "id": 3,
+    "name": "민준",
+    "email": "minjun@example.com",
+    "isActive": true
+  },
+  {
+    "id": 1,
+    "name": "서연",
+    "email": "seoyeon@example.com",
+    "isActive": false
+  },
+  {
+    "id": 5,
+    "name": "지호",
+    "email": "jiho@example.com",
+    "isActive": true
+  },
+  {
+    "id": 2,
+    "name": "하윤",
+    "email": "hayoon@example.com",
+    "isActive": false
+  },
+  {
+    "id": 4,
+    "name": "도윤",
+    "email": "doyoon@example.com",
+    "isActive": true
+  }
+]

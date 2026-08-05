@@ -2,6 +2,8 @@
 // 실행: node projects/dbq/dbq.ts
 // 검사: npx tsc --noEmit
 
+import { readFileSync } from "node:fs";
+
 // codeStep 369 — 스키마 타입 정의하기
 
 // Eq는 두 타입이 정확히 같은지를 판별해, 호버로 확인하던 결과를 컴파일러 검사로 고정하는 장치다.
@@ -45,6 +47,20 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
       this.tableName,
       [...this.selectedCols, ...cols] as [...Selected, ...Cols],
     );
+  }
+
+  // 저장된 테이블을 읽은 뒤 selectedCols에 기록된 컬럼만 새 객체로 옮겨 담는다.
+  // select를 호출하지 않아 선택 목록이 비어 있으면 JSON 첫 행의 모든 컬럼을 사용한다.
+  rows(): Pick<Row, Selected[number]>[] {
+    const table = loadTable<Row>(this.tableName);
+    const cols = (this.selectedCols.length > 0
+      ? this.selectedCols
+      : Object.keys(table[0] as object)) as readonly Selected[number][];
+    return table.map((row) => {
+      const picked = {} as Record<PropertyKey, unknown>;
+      for (const col of cols) picked[col as PropertyKey] = row[col];
+      return picked as Pick<Row, Selected[number]>;
+    });
   }
 }
 
@@ -96,5 +112,27 @@ console.log((afterName as object) === (qb as object));
 
 // @ts-expect-error - 스키마에 없는 컬럼 이름은 select에 넘길 수 없다.
 qb.select("nope");
+
+// codeStep 373 — 선택된 컬럼만 남도록 행 타입 좁히기
+
+// 테이블 이름과 같은 JSON 파일을 현재 모듈 기준 data 디렉터리에서 찾아 행 배열로 읽는다.
+// JSON은 TableSchemas에 맞춰 관리하며, 이 단계에서는 파싱 결과를 해당 Row 배열로 해석한다.
+// data/users.json은 뒤 화에서 필터와 정렬을 눈으로 확인할 수 있도록 isActive 값을 섞어 두었고,
+// id도 파일 안에서 오름차순이 되지 않게 배치했다. posts의 authorId는 모두 users의 id를 가리킨다.
+function loadTable<Row>(tableName: string): Row[] {
+  const url = new URL(`./data/${tableName}.json`, import.meta.url);
+  return JSON.parse(readFileSync(url, "utf8")) as Row[];
+}
+
+const pickedRows = qb.select("id", "name").rows();
+const pickedRowsMatch: Eq<typeof pickedRows, Pick<UsersSchema, "id" | "name">[]> = true;
+console.log(pickedRows); // id와 name만 담긴 객체 배열
+
+// select를 생략하면 런타임은 JSON 첫 행에서 얻은 전체 컬럼을 돌려준다.
+// 그러나 Selected가 빈 튜플이므로 정적 타입은 Pick<UsersSchema, never>[], 즉 {}[]로 남는다.
+// 이 단계에서 생기는 런타임 결과와 정적 타입의 차이를 Eq 단언으로 숨김없이 고정한다.
+const allRows = from("users").rows();
+const allRowsMatch: Eq<typeof allRows, {}[]> = true;
+console.log(allRows); // 원본 테이블 전체 컬럼
 
 export {};
