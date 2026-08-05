@@ -18,21 +18,34 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 // 각 태그는 지난 시간에 고정한 PNG colorType과 정확히 하나씩 짝지어진다: RGBA8→6, RGB8→2, Gray8→0.
 type PixelFormat = "RGBA8" | "RGB8" | "Gray8";
 
-interface ImageBuffer<Format extends PixelFormat> {
+// codeStep 447 — 픽셀 포맷뿐 아니라 너비와 높이도 타입 매개변수로 들고 다닌다.
+// 기본값을 number로 두었으므로 기존의 ImageBuffer<"RGBA8"> 표기는 그대로 쓸 수 있고,
+// 필요한 자리에서만 ImageBuffer<"RGBA8", 100, 60>처럼 정확한 크기를 표현할 수 있다.
+interface ImageBuffer<
+  Format extends PixelFormat,
+  W extends number = number,
+  H extends number = number,
+> {
   readonly data: Uint8ClampedArray;
-  readonly width: number;
-  readonly height: number;
+  readonly width: W;
+  readonly height: H;
   /** 타입에만 존재하는 표시. 실제 객체엔 절대 채우지 않는다 — 그래서 팬텀(phantom)이다. */
   readonly __format?: Format;
 }
 
-function makeImageBuffer<Format extends PixelFormat>(
+function makeImageBuffer<
+  Format extends PixelFormat,
+  W extends number = number,
+  H extends number = number,
+>(
   data: Uint8ClampedArray,
-  width: number,
-  height: number,
-): ImageBuffer<Format> {
+  width: W,
+  height: H,
+): ImageBuffer<Format, W, H> {
   // __format이 옵셔널이라 값을 넣지 않아도 구조적으로 ImageBuffer를 만족한다.
   // 포맷 정보는 런타임 객체를 더럽히지 않고 타입 검사에만 남는다.
+  // 숫자 리터럴을 넘기면 W와 H도 그 리터럴로 추론된다. 이렇게 얻은 ImageBuffer<F, 3, 2>는
+  // 너비·높이를 number로 받는 기존 ImageBuffer<F>에도 그대로 대입되므로 이전 호출부는 깨지지 않는다.
   return { data, width, height };
 }
 
@@ -759,7 +772,12 @@ function copyPixel(
 
 // codeStep 446 — 90도 회전은 픽셀 포맷과 바이트 수를 보존하지만 너비와 높이를 맞바꾼다.
 // 스테이지 유니온에는 넣지 않고 평범한 함수로 두어, 크기를 보존하는 플립과 역할을 구분한다.
-function rotate90(buf: ImageBuffer<"RGBA8">): ImageBuffer<"RGBA8"> {
+// codeStep 447 — 입력의 W·H를 결과의 H·W로 놓아 런타임의 크기 교환을 타입에도 그대로 기록한다.
+// pixelIndex가 픽셀당 4바이트를 전제로 하므로 포맷은 제네릭으로 열지 않고 RGBA8로 고정한다.
+// Gray8 같은 포맷까지 허용하면 타입은 통과해도 좌표별 바이트 오프셋이 조용히 틀어질 수 있다.
+function rotate90<W extends number, H extends number>(
+  buf: ImageBuffer<"RGBA8", W, H>,
+): ImageBuffer<"RGBA8", H, W> {
   const outWidth = buf.height;
   const outHeight = buf.width;
   const out = new Uint8ClampedArray(buf.data.length);
@@ -774,6 +792,8 @@ function rotate90(buf: ImageBuffer<"RGBA8">): ImageBuffer<"RGBA8"> {
     }
   }
 
+  // outWidth는 buf.height에서 온 H, outHeight는 buf.width에서 온 W다. 따라서 같은 런타임 값을
+  // makeImageBuffer에 넘기는 것만으로 반환 타입도 ImageBuffer<"RGBA8", H, W>로 추론된다.
   return makeImageBuffer(out, outWidth, outHeight);
 }
 
@@ -1222,6 +1242,22 @@ function main(): void {
       `${rotatedDecoded.width}x${rotatedDecoded.height} ` +
       `bytes=${decodedImage.data.length} -> ${rotatedDecoded.data.length}`,
   );
+
+  // codeStep 447 — 100×60 버퍼는 값뿐 아니라 타입에서도 두 리터럴을 정확히 들고 있다.
+  const wide = makeImageBuffer<"RGBA8", 100, 60>(
+    new Uint8ClampedArray(100 * 60 * 4),
+    100,
+    60,
+  );
+
+  // 회전 결과를 60×100 타입에 그대로 받을 수 있다 — 타입 인자가 자리를 바꿨다는 증거다.
+  const tall: ImageBuffer<"RGBA8", 60, 100> = rotate90(wide);
+
+  // @ts-expect-error — 회전 결과는 100×60이 아니라 60×100이라 대입이 막힌다
+  const wrongSize: ImageBuffer<"RGBA8", 100, 60> = rotate90(wide);
+
+  // 타입에서 자리를 바꾼 두 숫자가 실행 중의 width·height와도 정확히 같은지 마지막 줄에서 확인한다.
+  console.log(`회전 타입 크기 ${wide.width}x${wide.height} -> ${tall.width}x${tall.height}`);
 }
 
 main();
