@@ -180,6 +180,28 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
   }
 }
 
+// codeStep 430 — pipeline의 인자를 최소 한 개 이상의 스테이지를 담는 가변 인자 튜플로 받는다.
+// 배열 타입으로 뭉개지지 않으므로 Stages는 [InvertStage, GrayscaleStage]처럼
+// 호출 위치마다 각 원소의 타입과 순서를 그대로 보존해 추론된다.
+// 반환 타입은 아직 unknown으로 비워 둔다. 인접 검사를 표현할 재귀 조건부 타입을 만든 뒤에 채운다.
+function pipeline<Stages extends readonly [AnyStage, ...AnyStage[]]>(
+  ...stages: Stages
+): unknown {
+  const first = stages[0];
+  const last = stages[stages.length - 1];
+  return { in: first.in, out: last.out };
+}
+
+// Stages는 [InvertStage, GrayscaleStage] 튜플로 추론된다.
+const previewPipeline = pipeline(invertStage(), grayscaleStage());
+
+// plan은 readonly AnyStage[]라서 원소별 위치 정보와 "최소 한 개"라는 보장을 잃었다.
+// 호출하지 않는 데모 안에 두어 런타임에는 영향을 주지 않되, 배열 spread의 실패는 계속 검사한다.
+function spreadPlanArrayDemo(): void {
+  // @ts-expect-error — TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+  pipeline(...plan);
+}
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
