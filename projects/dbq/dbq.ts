@@ -39,17 +39,20 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   // codeStep 378에서는 rows가 이 배열을 순회해 실제 행도 같은 조건으로 거른다.
   private filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[];
   private order?: { column: keyof Row; direction: "asc" | "desc" };
+  private limitCount?: number;
 
   constructor(
     tableName: string,
     selectedCols: Selected = [] as unknown as Selected,
     filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[] = [],
     order?: { column: keyof Row; direction: "asc" | "desc" },
+    limitCount?: number,
   ) {
     this.tableName = tableName;
     this.selectedCols = selectedCols;
     this.filters = filters;
     this.order = order;
+    this.limitCount = limitCount;
   }
 
   // select는 Row에 실제로 존재하는 컬럼만 가변 인자로 받고, 기존 선택 뒤에 새 선택을 이어 붙인다.
@@ -66,6 +69,10 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
       // filters는 push로 같은 배열에 조건을 쌓으므로 사본을 넘기지만, order는 orderBy를
       // 호출할 때마다 새 객체로 교체되는 값이라 그대로 전달해도 앞 빌더의 배열 상태를 공유하지 않는다.
       this.order,
+      // limit도 select가 만드는 새 인스턴스에 현재 제한 개수를 넘겨야 한다.
+      // codeStep 376의 filters와 codeStep 380의 order가 그랬듯이, 넘기지 않으면
+      // limit(...).select(...)에서 오류 없이 실행되면서 개수 제한만 조용히 사라진다.
+      this.limitCount,
     );
   }
 
@@ -92,6 +99,13 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
     return this;
   }
 
+  // limit은 최대 반환 행 수를 빌더에 저장하고 this를 그대로 돌려준다.
+  // 따라서 where와 orderBy처럼 같은 호출 체인 안에서 뒤 메서드를 계속 이어 붙일 수 있다.
+  limit(n: number): this {
+    this.limitCount = n;
+    return this;
+  }
+
   // column은 Row에 실제로 있는 컬럼 이름만 받아 ColumnRef로 감싼 타입을 돌려준다.
   // 실행 시점에는 문자열 값을 그대로 반환하고, 브랜드 표시는 타입 레벨에만 남는다.
   column<K extends keyof Row>(name: K): ColumnRef<Row, K> {
@@ -112,7 +126,13 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
     const filteredRows = table.filter((row) =>
       this.filters.every((filter) => matchesFilter(row[filter.column], filter.operator, filter.value)),
     );
-    return filteredRows.map((row) => {
+    // rows는 거르기, 정렬, 자르기 순서를 강제한다. 따라서 체인에서 limit을 orderBy보다 먼저
+    // 불러도 결과는 같다. 개수를 먼저 자른 뒤 정렬하면 "이름순 상위 2개"가 아니라
+    // "아무 2개를 이름순으로 놓은 것"이 되므로, 이 순서가 곧 조회의 뜻이다.
+    let resultRows = filteredRows;
+    if (this.order) resultRows = sortByColumn(resultRows, this.order);
+    if (this.limitCount !== undefined) resultRows = resultRows.slice(0, this.limitCount);
+    return resultRows.map((row) => {
       const picked = {} as Record<PropertyKey, unknown>;
       for (const col of cols) picked[col as PropertyKey] = row[col];
       return picked as Pick<Row, Selected[number]>;
@@ -199,6 +219,22 @@ function matchesFilter(left: unknown, operator: ComparisonOp, right: unknown): b
     case "<=":
       return (left as number) <= (right as number);
   }
+}
+
+function sortByColumn<Row>(rows: Row[], order: { column: keyof Row; direction: "asc" | "desc" }): Row[] {
+  // sort는 원본 배열을 제자리에서 바꾸므로, 사본을 만들지 않으면 filter가 돌려준 배열을 통해
+  // 호출자 쪽 데이터까지 흔들 수 있다. 그래서 펼침으로 사본을 만든 뒤 그 사본만 정렬한다.
+  return [...rows].sort((left, right) => {
+    const leftValue = left[order.column];
+    const rightValue = right[order.column];
+    if (leftValue === rightValue) return 0;
+    // 컬럼 값의 정적 타입은 Row[keyof Row]라 이 자리에서 구체 타입을 알 수 없다.
+    // 숫자와 문자열은 모두 < 연산자로 순서를 매길 수 있으므로 그 둘로 좁혀 비교한다.
+    // 문자열은 코드 단위 순서로 비교되므로 한글 이름도 일관된 순서를 얻는다.
+    const ascending = (leftValue as number | string) < (rightValue as number | string) ? -1 : 1;
+    // 내림차순은 오름차순 비교 결과의 부호만 뒤집어 같은 비교 함수를 재사용한다.
+    return order.direction === "asc" ? ascending : -ascending;
+  });
 }
 
 const pickedRows = qb.select("id", "name").rows();
@@ -376,5 +412,63 @@ const orderedByNameDescMatch: Eq<typeof orderedByNameDesc, QueryBuilder<UsersSch
 
 // rows는 아직 order 필드를 읽지 않는다. 실제 정렬 로직은 codeStep 381에서 추가하므로,
 // 이 스텝을 실행해도 콘솔 출력은 앞 스텝과 완전히 같다.
+
+// codeStep 381 — limit으로 체인 마무리하기
+
+// 활성 사용자를 이름 오름차순으로 정렬한 뒤 앞의 두 행만 남긴다. 이 화에서 확인하려는 payoff다.
+// 이 조회가 바로 생성자 전달이 필요한 형태다. orderBy와 limit으로 상태를 쌓은 뒤 select를 부르면
+// select가 새 인스턴스를 만들면서 order와 limitCount를 함께 넘겨야 그 상태가 살아남는다.
+// 넘기지 않으면 오류 하나 없이 정렬과 개수 제한이 사라져 거르기만 한 세 행이 그대로 나온다.
+const activeQuery = from("users");
+const topTwoActiveByName = activeQuery
+  .where("isActive", "=", true)
+  .orderBy(activeQuery.column("name"))
+  .limit(2)
+  .select("id", "name")
+  .rows();
+console.log(topTwoActiveByName);
+
+// 같은 조회에서 limit만 뺀 결과다. 활성 사용자는 세 명이므로 세 행이 모두 나온다.
+// 바로 위 출력과 나란히 보면 limit이 실제로 개수를 잘랐다는 것이 눈에 보인다.
+const allActiveByName = from("users");
+console.log(
+  allActiveByName
+    .where("isActive", "=", true)
+    .orderBy(allActiveByName.column("name"))
+    .select("id", "name")
+    .rows(),
+);
+
+// 방향을 명시한 오버로드로 id 내림차순 정렬을 확인한다.
+// data/users.json의 id는 파일 안에서 3, 1, 5, 2, 4 순서라 정렬이 실제로 순서를 바꾼다.
+const byIdDesc = from("users");
+console.log(byIdDesc.orderBy(byIdDesc.column("id"), "desc").select("id", "name").rows());
+
+// select를 먼저 부른 뒤 where, orderBy, limit을 이어도 첫 번째 조회와 같은 결과가 나온다.
+// 다만 이 순서는 생성자 전달과 무관하다. select가 이미 새 인스턴스를 돌려준 뒤에 그 인스턴스
+// 위로 조건과 정렬과 개수를 쌓기 때문에, 넘겨줄 이전 상태가 애초에 없다.
+// 그래서 첫 번째 조회와 이 조회를 함께 두면, 생성자 전달이 있어야만 두 순서가 같은 답을 낸다는
+// 사실이 드러난다. 전달을 빼고 실행하면 이 조회만 그대로이고 나머지 정렬 조회가 전부 어긋난다.
+const selectFirst = from("users");
+console.log(
+  selectFirst
+    .select("id", "name")
+    .where("isActive", "=", true)
+    .orderBy(selectFirst.column("name"))
+    .limit(2)
+    .rows(),
+);
+
+// limit을 orderBy보다 먼저 불러도 첫 번째 조회와 같은 결과가 나온다.
+// rows가 거르기, 정렬, 자르기 순서를 강제하므로 체인의 호출 순서가 뜻을 바꾸지 않는다.
+const limitBeforeOrder = from("users");
+console.log(
+  limitBeforeOrder
+    .where("isActive", "=", true)
+    .limit(2)
+    .orderBy(limitBeforeOrder.column("name"))
+    .select("id", "name")
+    .rows(),
+);
 
 export {};
