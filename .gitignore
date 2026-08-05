@@ -50,6 +50,8 @@ jspm_packages/
 # 강의 실습 산출물 (§17 ledger — 인터프리터가 만드는 저널 파일과 실행 로그)
 projects/ledger/journal.json
 projects/ledger/run-log.json
+# 강의 실습 산출물 (imgfx — PNG 코덱 왕복으로 만드는 복사본)
+projects/imgfx/copy.png
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
