@@ -9,7 +9,8 @@
     "typecheck:parallel": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 8",
     "typecheck:single": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 1",
     "bench:slow": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict episodes/s29-diagnostics/slow-reverse.ts",
-    "bench:fast": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict episodes/s29-diagnostics/fast-reverse.ts"
+    "bench:fast": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict episodes/s29-diagnostics/fast-reverse.ts",
+    "bench:iface": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict episodes/s29-diagnostics/interface-cache.ts"
   },
   "repository": {
     "type": "git",
