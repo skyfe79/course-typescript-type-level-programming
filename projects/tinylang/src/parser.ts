@@ -1,7 +1,7 @@
 // 토큰 배열 위를 한 번만 앞으로 이동하면서, 연산자 우선순위가 드러나는 식 트리를 만든다.
 
 import type { Expr } from "./ast.ts";
-import type { Operator, Token, TokenKind } from "./tokens.ts";
+import type { Operator, Punct, Token, TokenKind } from "./tokens.ts";
 
 // 파서마다 자기 커서를 갖게 하면 서로 다른 토큰 배열을 파싱하는 작업이 전역 상태를
 // 공유하지 않는다. 다음 화에서 문 파싱 함수와 진단 수집 상태가 늘어나더라도 모두 이
@@ -53,6 +53,36 @@ export function createParser(tokens: readonly Token[]) {
 
     advance();
     return found;
+  }
+
+  // 연산자와 달리 구두점은 AST에 실리는 값이 아니라 식의 시작과 끝을 알려 주는
+  // 경계 표식이다. 따라서 찾은 Punct를 돌려줄 필요 없이, 맞으면 소비했다는 사실만
+  // boolean으로 알린다. 이 자리는 위 matchOperator와 짝을 이루는 구두점 헬퍼다.
+  function matchPunct(char: Punct): boolean {
+    const token = peek();
+    if (token.kind !== "punct" || token.char !== char) return false;
+
+    advance();
+    return true;
+  }
+
+  function expectPunct(char: Punct): Token {
+    const token = peek();
+    if (token.kind === "punct" && token.char === char) {
+      return advance();
+    }
+
+    // 이 throw는 닫는 경계를 반드시 확인하기 위한 의도된 임시 상태다. 다음 화
+    // (ep_209, codeStep 467)에서는 예외를 던지는 대신 ParseResult와 Diagnostic 값에
+    // 현재 위치를 담아, 호출자가 파싱 오류를 데이터로 다룰 수 있게 바꾼다.
+    throw new Error(`'${char}' 구두점이 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+  }
+
+  // 괄호 안에서는 바깥에서 내려오던 우선순위를 이어 가지 않고 가장 낮은 or부터
+  // 다시 시작해야 한다. 그래서 그룹핑을 만드는 이번 스텝에, parsePrimary가 우선순위
+  // 체인의 꼭대기를 다시 부를 수 있는 완전한 식의 진입점 이름이 함께 생긴다.
+  function parseExpression(): Expr {
+    return parseOr();
   }
 
   // 아래 여섯 함수는 모두 "더 강한 레벨을 먼저 읽고, 같은 레벨 연산자를 while로
@@ -143,12 +173,27 @@ export function createParser(tokens: readonly Token[]) {
   }
 
   function parseUnary(): Expr {
-    // 이번 스텝에서는 우선순위 체인을 실행하는 데 필요한 통로만 둔다. 단항 -와 !를
-    // 재귀적으로 묶는 처리는 다음 스텝(codeStep 464)에서 바로 이 자리에 채운다.
+    const operator = matchOperator("-", "!");
+    if (operator !== undefined) {
+      // 이항 레벨은 while로 왼쪽 결합을 만들지만, 피연산자 앞에 붙는 전위 단항은
+      // 오른쪽 결합이다. 자기 자신을 다시 불러 - -3도 안쪽 단항부터 차례로 묶는다.
+      const operand = parseUnary();
+      return { kind: "unary", operator, operand };
+    }
+
     return parsePrimary();
   }
 
   function parsePrimary(): Expr {
+    if (matchPunct("(")) {
+      // 괄호는 묶는 방법만 정한다. 트리가 완성되면 그 묶음은 자식 관계 자체에 이미
+      // 기록되므로 group 노드를 덧붙이지 않고 안쪽 식을 그대로 돌려준다. Expr에
+      // group 변형이 없는 이유도 같다.
+      const inner = parseExpression();
+      expectPunct(")");
+      return inner;
+    }
+
     const token = peek();
 
     // kind 검사로 Token 유니온이 number 변형으로 좁혀지므로 value를 단언 없이 읽어
@@ -158,15 +203,16 @@ export function createParser(tokens: readonly Token[]) {
       return { kind: "literal", value: token.value };
     }
 
-    // 문자열·불리언·식별자·괄호는 다음 스텝들(codeStep 464·465)에서 채운다.
+    // 문자열·불리언·식별자는 다음 스텝(codeStep 465)에서 채운다.
     // 지금의 throw도 의도된 임시 상태다. 렉서가 그랬듯 다음 화(ep_209)에서는 파싱
     // 오류를 예외가 아닌 ParseResult의 진단 값으로 모아 호출자에게 돌려준다.
     throw new Error("표현식이 와야 하는 자리입니다");
   }
 
-  // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 이후 문 파서는 가장 낮은
-  // 우선순위의 parseOr를 완전한 식의 진입점으로 사용하게 된다.
+  // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
+  // 들어오고, 개별 우선순위 함수도 교육용 관찰 스크립트에서 계속 확인할 수 있다.
   return {
+    parseExpression,
     parseOr,
     parseAnd,
     parseEquality,
