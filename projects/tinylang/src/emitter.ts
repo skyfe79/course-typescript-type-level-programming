@@ -2,10 +2,10 @@
 
 import type { Block, Expr, FuncDecl, IfStatement, Program, Statement } from "./ast.ts";
 
-// 런타임 프렐류드는 생성된 코드의 바깥에서 이 네 이름으로 제공된다. as const를
+// 런타임 프렐류드는 생성된 코드의 바깥에서 이 이름들로 제공된다. as const를
 // 붙여 각 원소를 넓은 string이 아니라 정확한 문자열 리터럴 타입으로 보존한다.
 // 목록과 타입을 한곳에서 만들면 이름을 더할 때 값과 타입을 따로 고칠 필요가 없다.
-export const BUILTIN_NAMES = ["print", "input", "toNumber", "random"] as const;
+export const BUILTIN_NAMES = ["print", "input", "toNumber", "random", "toString"] as const;
 export type BuiltinName = (typeof BUILTIN_NAMES)[number];
 
 // 포함 여부는 매 호출마다 배열을 순회하지 않고 집합에서 찾는다. ReadonlySet으로
@@ -159,11 +159,12 @@ export function emitFunction(func: FuncDecl, level: number = 0): string {
 
 export function emitProgram(program: Program): string {
   // 코드 생성 시점에는 어떤 내장 함수가 실제로 쓰였는지 따로 추적하지 않는다. 언제나
-  // 네 이름을 한꺼번에 가져오면 식 emitter와 프렐류드 사이의 계약이 단순하고 일정하다.
+  // 모든 이름을 한꺼번에 가져오면 식 emitter와 프렐류드 사이의 계약이 단순하고 일정하다.
+  // import에 이름을 다시 손으로 적으면 내장 함수를 추가할 때 두 목록이 어긋날 수 있으므로,
+  // 타입과 이름 판별에도 쓰는 BUILTIN_NAMES를 유일한 정본으로 삼아 import 구문을 조립한다.
   // 생성 파일은 ESM으로 실행되므로 require가 아니라 import를 쓰며, Node의 ESM 해석은
   // 상대 경로의 확장자를 자동으로 보충하지 않으므로 지정자에 .js까지 반드시 적는다.
-  // 이 import가 가리키는 prelude.js는 아직 없고, 다음 화에서 런타임 구현으로 추가한다.
-  const prelude = 'import { print, input, toNumber, random } from "./prelude.js";';
+  const prelude = `import { ${BUILTIN_NAMES.join(", ")} } from "./prelude.js";`;
 
   // 함수 선언끼리는 빈 줄 하나를 두되, 함수가 하나도 없으면 빈 문자열을 만든다.
   // 최상위 문은 소스의 순서를 유지하며 모두 level 0에서 변환한다.
