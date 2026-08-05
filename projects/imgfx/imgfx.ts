@@ -38,6 +38,20 @@ function makeImageBuffer<Format extends PixelFormat>(
 
 const rgba: ImageBuffer<"RGBA8"> = makeImageBuffer(new Uint8ClampedArray(4), 1, 1);
 
+// 픽셀당 바이트 수는 호출자가 손으로 적지 않고 포맷 태그 하나에서만 유도한다.
+const BYTES_PER_PIXEL = { RGBA8: 4, RGB8: 3, Gray8: 1 } as const;
+
+// 인덱스 접근 타입으로 태그에 대응하는 값 타입을 그대로 꺼낸다.
+// 그래서 반환 타입이 뭉뚱그린 number가 아니라 RGBA8이면 4, Gray8이면 1로 좁혀진다.
+type BytesPerPixelOf<Format extends PixelFormat> = (typeof BYTES_PER_PIXEL)[Format];
+
+function bytesPerPixel<Format extends PixelFormat>(format: Format): BytesPerPixelOf<Format> {
+  return BYTES_PER_PIXEL[format];
+}
+
+const rgbaSize = bytesPerPixel("RGBA8"); // 타입은 number가 아니라 리터럴 4다.
+const graySize = bytesPerPixel("Gray8"); // 타입은 number가 아니라 리터럴 1이다.
+
 // 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
 const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
@@ -65,6 +79,7 @@ function writePng(
 function main(): void {
   // 직렬화 결과에는 data·width·height만 있고 타입 전용 팬텀 필드 __format은 어디에도 없다.
   console.log(JSON.stringify(rgba));
+  console.log(`bytesPerPixel RGBA8=${rgbaSize} Gray8=${graySize}`);
 
   const decoded = readPng(INPUT_URL);
 
