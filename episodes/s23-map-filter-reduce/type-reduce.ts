@@ -145,4 +145,38 @@ const stringsAtRuntime = [1, "a", 2, "b"].reduce<string[]>(
 console.log("Rebuilt with reduce:", rebuiltAtRuntime);
 console.log("Only strings with reduce:", stringsAtRuntime);
 
+// codeStep 335 — ReduceT로 숫자의 합을 구한다.
+
+// 단순한 대입은 결과가 넓은 타입이어도 통과할 수 있다. 두 타입이 정확히 같은지를 비교하는 Eq를
+// 한 번 선언하고, 이번 화에서 만드는 세 결과가 기대한 리터럴과 인터섹션을 그대로 보존하는지 증명한다.
+type Eq<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends
+  (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+// 앞서 만든 튜플 산술을 이 파일에서도 스스로 완결되도록 다시 선언한다.
+// 목표 길이에 닿을 때까지 자리표시자를 누산기에 쌓으면 숫자 리터럴 N을 튜플 길이로 표현할 수 있다.
+type BuildTuple<N extends number, Acc extends unknown[] = []> =
+  Acc["length"] extends N ? Acc : BuildTuple<N, [...Acc, unknown]>;
+
+// 숫자 두 개를 각각 튜플로 만든 뒤 이어 붙이면, 이어 붙인 튜플의 길이가 덧셈 결과다.
+type Add<A extends number, B extends number> =
+  [...BuildTuple<A>, ...BuildTuple<B>]["length"];
+
+// 제네릭 화살표 결합 함수는 실제 누산기와 원소의 리터럴 타입을 잃을 수 있으므로 TypeFn2를 사용한다.
+// acc와 item은 선언상 unknown이다. 각 슬롯을 따로 좁히는 중첩 조건부 타입을 거친 뒤에만 Add에 넘긴다.
+interface SumF extends TypeFn2 {
+  readonly out: this["acc"] extends number
+    ? this["item"] extends number
+      ? Add<this["acc"], this["item"]>
+      : never
+    : never;
+}
+
+type Total = ReduceT<[1, 2, 3, 4], SumF, 0>;
+
+// ReduceT가 숫자 리터럴을 단계마다 더해 정확히 10을 만들었음을 타입 동일성으로 고정한다.
+const totalIsTen: Eq<Total, 10> = true;
+// @ts-expect-error - Total은 10이므로 11과 정확히 같은 타입일 수 없다
+const totalIsNotEleven: Eq<Total, 11> = true;
+
 export {};
