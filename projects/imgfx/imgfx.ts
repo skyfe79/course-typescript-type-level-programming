@@ -69,6 +69,49 @@ requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
 const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
 
+// codeStep 428 — 파이프라인의 각 단계를 함수가 아니라 평범한 데이터로 표현한다.
+// 함수로만 보관하면 실제로 호출해 보기 전에는 무슨 작업인지 알 수 없어서,
+// 목록 출력·재정렬·사전 검사를 실제 이미지 처리와 분리하기 어렵다.
+interface Stage<Kind extends string, In extends PixelFormat, Out extends PixelFormat> {
+  // kind는 유니온의 정확한 멤버를 가려 내는 판별자(discriminant)다.
+  readonly kind: Kind;
+  // in과 out은 나중에 앞 스테이지의 출력과 뒤 스테이지의 입력을 맞물리게 할 포맷 태그다.
+  readonly in: In;
+  readonly out: Out;
+}
+
+interface InvertStage extends Stage<"invert", "RGBA8", "RGBA8"> {}
+interface GrayscaleStage extends Stage<"grayscale", "RGBA8", "Gray8"> {}
+interface BrightnessStage extends Stage<"brightness", "RGBA8", "RGBA8"> {
+  readonly amount: number;
+}
+interface ContrastStage extends Stage<"contrast", "RGBA8", "RGBA8"> {
+  readonly amount: number;
+}
+
+// 모든 스테이지를 하나의 판별 유니온으로 모으면 kind를 확인할 때 나머지 필드도 함께 좁혀진다.
+type AnyStage = InvertStage | GrayscaleStage | BrightnessStage | ContrastStage;
+
+// 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
+function invertStage(): InvertStage {
+  return { kind: "invert", in: "RGBA8", out: "RGBA8" };
+}
+
+function grayscaleStage(): GrayscaleStage {
+  return { kind: "grayscale", in: "RGBA8", out: "Gray8" };
+}
+
+function brightnessStage(amount: number): BrightnessStage {
+  return { kind: "brightness", amount, in: "RGBA8", out: "RGBA8" };
+}
+
+function contrastStage(amount: number): ContrastStage {
+  return { kind: "contrast", amount, in: "RGBA8", out: "RGBA8" };
+}
+
+// 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
+const plan: readonly AnyStage[] = [invertStage(), brightnessStage(20), grayscaleStage()];
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -93,6 +136,8 @@ function main(): void {
   // 직렬화 결과에는 data·width·height만 있고 타입 전용 팬텀 필드 __format은 어디에도 없다.
   console.log(JSON.stringify(rgba));
   console.log(`bytesPerPixel RGBA8=${rgbaSize} Gray8=${graySize}`);
+  // 스테이지가 순수 데이터이므로 실행 전에 계획 자체를 그대로 관찰할 수 있다.
+  console.log(`plan ${JSON.stringify(plan)}`);
 
   const decoded = readPng(INPUT_URL);
 
