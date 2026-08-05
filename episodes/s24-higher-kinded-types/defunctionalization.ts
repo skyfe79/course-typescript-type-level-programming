@@ -21,4 +21,18 @@ interface Double extends TypeFn {
 // 제네릭 Double<T>였다면 T를 채우지 않고는 이 대입 자체를 작성할 수 없다.
 type StoredFn = Double;
 
+// codeStep 342 — apply로 타입 함수 호출하기
+
+// F와 실제 input을 교차하면 비어 있던 입력 슬롯이 X로 채워진다.
+// 그 결과의 apply 멤버를 꺼내면 F가 X에 적용된 최종 결과 타입을 얻는다.
+type Apply<F extends TypeFn, X> = (F & { readonly input: X })["apply"];
+
+type Result = Apply<Double, 5>;
+const check: Result = [5, 5];
+
+// 반대 방향 대입이 통과하므로 Result가 [number, number]로 넓어지지 않고 리터럴 5를 보존했음을 증명한다.
+const checkExact: [5, 5] = check;
+
+console.log("Apply<Double, 5> =", check);
+
 export {};
