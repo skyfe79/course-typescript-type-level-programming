@@ -53,4 +53,22 @@ type Params = ParseParams<typeof route>;
 
 const paramsMatch: Eq<Params, { id: string; postId: string }> = true;
 
+// codeStep 366 — 여러 경로로 ParseParams 검증하기
+
+// 파라미터가 없는 경로, 하나인 경로, 세 개인 경로를 나란히 두고 재귀가 각 모양을 만드는지 확인한다.
+type NoParams = ParseParams<"/health">;
+type OneParam = ParseParams<"/users/:id">;
+type ThreeParams = ParseParams<"/a/:x/b/:y/c/:z">;
+
+const noParamsMatch: Eq<NoParams, {}> = true;
+const threeParamsMatch: Eq<ThreeParams, { x: string; y: string; z: string }> = true;
+
+const oneParam: OneParam = { id: "42" };
+
+// @ts-expect-error - OneParam에는 postId라는 키가 없어, 이 자리에 넣으면 초과 속성 오류가 난다.
+const rejected: OneParam = { id: "42", postId: "7" };
+
+// 타입 검사는 실행 후 사라지지만, 올바른 모양으로 만든 값은 런타임에서도 그대로 사용할 수 있다.
+console.log(oneParam);
+
 export {};
