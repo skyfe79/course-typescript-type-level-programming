@@ -38,15 +38,18 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   // 빠짐없이 다룰 수 있도록 operator를 넓은 string이 아니라 ComparisonOp로 제한한다.
   // codeStep 378에서는 rows가 이 배열을 순회해 실제 행도 같은 조건으로 거른다.
   private filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[];
+  private order?: { column: keyof Row; direction: "asc" | "desc" };
 
   constructor(
     tableName: string,
     selectedCols: Selected = [] as unknown as Selected,
     filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[] = [],
+    order?: { column: keyof Row; direction: "asc" | "desc" },
   ) {
     this.tableName = tableName;
     this.selectedCols = selectedCols;
     this.filters = filters;
+    this.order = order;
   }
 
   // select는 Row에 실제로 존재하는 컬럼만 가변 인자로 받고, 기존 선택 뒤에 새 선택을 이어 붙인다.
@@ -58,6 +61,11 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
       // select는 새 인스턴스를 반환한다. 기존 조건의 사본을 생성자에 넘기지 않으면
       // where(...).select(...)가 오류 없이 실행되면서 조건만 조용히 사라지게 된다.
       [...this.filters],
+      // orderBy도 같은 이유로 select가 만드는 새 인스턴스에 현재 정렬 상태를 넘겨야 한다.
+      // 넘기지 않으면 orderBy(...).select(...)가 오류 없이 실행되면서 정렬만 조용히 사라진다.
+      // filters는 push로 같은 배열에 조건을 쌓으므로 사본을 넘기지만, order는 orderBy를
+      // 호출할 때마다 새 객체로 교체되는 값이라 그대로 전달해도 앞 빌더의 배열 상태를 공유하지 않는다.
+      this.order,
     );
   }
 
@@ -66,6 +74,21 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   // this를 그대로 반환하므로 where 뒤에 select나 where를 이어서 호출할 수 있다.
   where<K extends keyof Row>(column: K, operator: ColumnOperators<Row, K>, value: Row[K]): this {
     this.filters.push({ column, operator, value });
+    return this;
+  }
+
+  // 아래 두 줄은 호출부가 볼 수 있는 orderBy의 오버로드 시그니처다.
+  // 바깥에서는 컬럼 참조만 넘기거나, 컬럼 참조와 정렬 방향을 함께 넘기는 두 형태만 허용된다.
+  orderBy(column: ColumnRef<Row>): this;
+  orderBy(column: ColumnRef<Row>, direction: "asc" | "desc"): this;
+  // 구현 시그니처는 클래스 안에서 두 호출 형태를 처리하기 위한 몸체일 뿐이고,
+  // 호출부가 직접 고를 수 있는 시그니처로 노출되지 않는다.
+  // direction의 기본값을 "asc"로 두어 방향을 생략한 호출도 같은 구현에서 처리한다.
+  orderBy(column: ColumnRef<Row>, direction: "asc" | "desc" = "asc"): this {
+    // ColumnRef<Row>는 keyof Row에 브랜드를 인터섹션으로 덧붙인 타입이다.
+    // 따라서 브랜드가 붙은 값은 여전히 keyof Row 자리에 그대로 들어가며,
+    // 타입 안전을 흐리는 불필요한 단언 없이 정렬 컬럼으로 저장할 수 있다.
+    this.order = { column, direction };
     return this;
   }
 
@@ -336,5 +359,22 @@ const nameRefMatch: Eq<typeof nameRef, ColumnRef<UsersSchema, "name">> = true;
 // 아무 오류도 덮지 않은 지시어라며 TS2578을 낸다.
 // @ts-expect-error - error TS2322: Type '"name"' is not assignable to type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
 const bareStringRef: ColumnRef<UsersSchema> = "name";
+
+// codeStep 380 — orderBy 오버로드 시그니처 작성하기
+
+// column은 인스턴스 메서드이므로 컬럼 참조를 만들려면 먼저 빌더를 변수에 담아야 한다.
+// orderQuery.orderBy(orderQuery.column("name"))처럼 같은 빌더에서 만든 참조를 같은 빌더에 넘긴다.
+const orderQuery = from("users");
+const orderedByName = orderQuery.orderBy(orderQuery.column("name"));
+const orderedByNameDesc = orderQuery.orderBy(orderQuery.column("name"), "desc");
+
+// 두 호출이 모두 오류 없이 통과하므로 orderBy 오버로드가 방향 생략 호출과 방향 명시 호출을
+// 둘 다 받아들인다는 사실을 확인할 수 있다.
+// 반환 타입이 this라서 where처럼 Row와 Selected를 바꾸지 않고 같은 빌더 타입으로 체인이 이어진다.
+const orderedByNameMatch: Eq<typeof orderedByName, QueryBuilder<UsersSchema, []>> = true;
+const orderedByNameDescMatch: Eq<typeof orderedByNameDesc, QueryBuilder<UsersSchema, []>> = true;
+
+// rows는 아직 order 필드를 읽지 않는다. 실제 정렬 로직은 codeStep 381에서 추가하므로,
+// 이 스텝을 실행해도 콘솔 출력은 앞 스텝과 완전히 같다.
 
 export {};
