@@ -70,6 +70,51 @@ const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
 const OUT_DIR = new URL("./out/", import.meta.url);
 
+// codeStep 440 — 컨볼루션 커널의 전체 길이는 중심이 하나뿐인 홀수 정사각형이어야 한다.
+// 이번 프로젝트에서 다룰 최대 한 변은 7이므로, 허용되는 전체 길이를 닫힌 유니온으로 적는다.
+type OddSquareLength = 1 | 9 | 25 | 49;
+
+// 조건을 통과한 커널 값은 가중치 튜플과 한 변의 길이, 정규화에 쓸 나눗수를 함께 보관한다.
+// 가중치를 미리 나눈 number[]로 만들지 않고 정수 리터럴 튜플로 남겨야 길이 검사가 유지된다.
+interface KernelShape<W extends readonly number[]> {
+  readonly weights: W;
+  readonly side: number;
+  /** 가중치 합으로 나눈다. 박스는 3×3이면 9·5×5면 25, 가우시안은 16, 샤픈은 1이다. */
+  readonly divisor: number;
+}
+
+// 잘못된 길이를 never로 지우지 않고 이름 있는 인터페이스로 전달한다.
+// 호버에는 오류 이름과 Actual 타입 인자가 그대로 남아 무엇이 잘못됐는지 읽을 수 있다.
+interface KernelLengthMismatch<Actual extends number> {
+  readonly error: "KERNEL_LENGTH_NOT_ODD_SQUARE";
+  readonly allowed: OddSquareLength;
+  readonly actualLength: Actual;
+}
+
+type Kernel<W extends readonly number[]> =
+  W["length"] extends OddSquareLength
+    ? KernelShape<W>
+    : KernelLengthMismatch<W["length"] & number>;
+
+// 3×3의 아홉 가중치는 허용 유니온의 9에 해당하므로 정상 커널 모양을 만족한다.
+const boxKernel3x3: Kernel<readonly [1, 1, 1, 1, 1, 1, 1, 1, 1]> = {
+  weights: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  side: 3,
+  divisor: 9,
+};
+
+// 잘못된 예제는 호출하지 않는 함수에 두어 런타임 출력은 늘리지 않고 타입 검사 증거만 남긴다.
+function brokenKernelDemo(): void {
+  const brokenKernel: Kernel<readonly [1, 2, 3, 4, 5, 6, 7, 8]> = {
+    // @ts-expect-error — TS2353: 길이 8은 KernelLengthMismatch<8>이므로 weights 필드가 없다.
+    weights: [1, 2, 3, 4, 5, 6, 7, 8],
+    side: 3,
+    divisor: 8,
+  };
+
+  void brokenKernel;
+}
+
 // codeStep 428 — 파이프라인의 각 단계를 함수가 아니라 평범한 데이터로 표현한다.
 // 함수로만 보관하면 실제로 호출해 보기 전에는 무슨 작업인지 알 수 없어서,
 // 목록 출력·재정렬·사전 검사를 실제 이미지 처리와 분리하기 어렵다.
@@ -107,6 +152,15 @@ interface SaturateStage extends PixelStage<"saturate", "RGBA8", "RGBA8"> {
   readonly factor: number;
 }
 
+// codeStep 443 — 컨볼루션 셋은 모두 이웃을 읽으므로 실행기 관점에서는 kind 하나로 묶는다.
+// 실제 효과는 effect가 가르고, side와 edge만 보면 실행 전에 필요한 작업 범위도 설명할 수 있다.
+// 이 계열만 스크래치 버퍼가 필요하다는 판정도 kind === "convolve" 하나로 끝난다.
+interface ConvolveStage extends PixelStage<"convolve", "RGBA8", "RGBA8"> {
+  readonly effect: "box" | "gaussian" | "sharpen";
+  readonly side: number;
+  readonly edge: EdgePolicy;
+}
+
 // 모든 스테이지를 하나의 판별 유니온으로 모으면 kind를 확인할 때 나머지 필드도 함께 좁혀진다.
 type AnyStage =
   | InvertStage
@@ -114,7 +168,8 @@ type AnyStage =
   | BrightnessStage
   | ContrastStage
   | ThresholdStage
-  | SaturateStage;
+  | SaturateStage
+  | ConvolveStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
@@ -193,6 +248,50 @@ function saturateStage(factor: number): SaturateStage {
   };
 }
 
+// codeStep 443 — 박스 블러의 크기는 스테이지를 만드는 순간 검사해 잘못된 계획 생성을 막는다.
+function boxBlurStage(size: number, edge: EdgePolicy = "clamp"): ConvolveStage {
+  // NaN과 Infinity는 정수·홀수 검사만 믿지 않고 Number.isFinite에서 먼저 거른다.
+  if (!Number.isFinite(size) || !Number.isInteger(size) || size < 1 || size % 2 === 0) {
+    throw new Error(`box blur size는 1 이상의 유한한 홀수 정수여야 합니다: ${size}`);
+  }
+
+  return {
+    kind: "convolve",
+    effect: "box",
+    side: size,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => boxBlurSeparable(buf, size, edge),
+  };
+}
+
+// codeStep 443 — 이름이 gaussianKernel ↔ gaussianBlurStage로 짝지어져 값과 스테이지를 구분한다.
+function gaussianBlurStage(edge: EdgePolicy = "clamp"): ConvolveStage {
+  return {
+    kind: "convolve",
+    effect: "gaussian",
+    side: gaussianKernel.side,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => convolve(buf, gaussianKernel, edge),
+  };
+}
+
+// codeStep 443 — 샤픈도 같은 일반 순회를 쓰고 커널 값만 바꾸는 스테이지다.
+function sharpenStage(edge: EdgePolicy = "clamp"): ConvolveStage {
+  return {
+    kind: "convolve",
+    effect: "sharpen",
+    side: sharpenKernel.side,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => convolve(buf, sharpenKernel, edge),
+  };
+}
+
 // codeStep 439 — 두 생성자가 실행보다 먼저 실패한다는 사실을 한 줄의 실행 결과로 관찰한다.
 function rejectedStageDemo(): string {
   const messages: string[] = [];
@@ -213,6 +312,14 @@ function rejectedStageDemo(): string {
     // 명령줄 인자를 Number로 바꾸다 실패하면 예외가 아니라 NaN이 돌아온다.
     // 크기 비교만으로 걸렀다면 이 값이 그대로 커널까지 흘러 들어갔을 자리다.
     thresholdStage(Number("128px"));
+  } catch (error) {
+    messages.push(error instanceof Error ? error.message : String(error));
+  }
+
+  // codeStep 443 — 컨볼루션 스테이지도 같은 규약을 따른다. 커널 크기는 홀수여야 중심이
+  // 하나로 정해지므로, 짝수 4는 이미지를 한 번도 읽기 전에 여기서 거부된다.
+  try {
+    boxBlurStage(4);
   } catch (error) {
     messages.push(error instanceof Error ? error.message : String(error));
   }
@@ -240,6 +347,9 @@ function describeStage(stage: AnyStage): string {
     // codeStep 438 — 채도도 factor까지 읽어 계획을 설명한다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — 실행기에게는 컨볼루션 하나이고, 효과와 크기는 스테이지 데이터가 설명한다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     default: {
       // 모든 case를 처리했다면 이 지점의 stage에는 가능한 값이 없어 never로 좁혀진다.
       const exhaustive: never = stage;
@@ -275,6 +385,9 @@ function describeStageMissingFlip(stage: AnyStageWithFlip): string {
     // codeStep 438 — saturate까지 처리해야 default에 FlipStage만 남는다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — 여기까지 처리하면 의도대로 default에는 계속 FlipStage 하나만 남는다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     default: {
       // flip을 처리하지 않았으므로 여기의 stage는 FlipStage로 남아 never에 대입할 수 없다.
       // @ts-expect-error — flip을 처리하지 않아 stage가 FlipStage로 남는다
@@ -301,6 +414,9 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
     // codeStep 438 — 모든 종류를 처리해야 default가 다시 never로 좁혀진다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — flip을 아는 실행기도 새 컨볼루션 종류를 빠뜨리지 않는다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     case "flip":
       return "뒤집기";
     default: {
@@ -499,6 +615,256 @@ const saturateKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
     ];
   };
 
+// codeStep 441 — 컨볼루션의 중간 결과만큼은 8비트 이미지 버퍼와 다른 표현이 필요하다.
+// 스크래치 버퍼는 중간 결과를 8비트로 반올림하지 않고 그대로 들고 있어야 한다.
+interface ScratchBuffer {
+  readonly data: Float64Array;
+  readonly width: number;
+  readonly height: number;
+}
+
+// 박스 커널은 가로 한 번, 세로 한 번으로 나눌 수 있다. 축 유니온은 두 순회의 방향을 제한한다.
+type ConvolveAxis = "row" | "column";
+
+// codeStep 442 — 이미지 밖 이웃을 안으로 되돌리는 방법은 참·거짓이 아니라 세 정책 중 하나다.
+type EdgePolicy = "clamp" | "wrap" | "mirror";
+
+function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
+  switch (policy) {
+    case "clamp":
+      return Math.max(0, Math.min(limit - 1, v));
+    case "wrap":
+      // 나머지를 한 번 더 보정하면 음수나 폭보다 훨씬 큰 좌표도 항상 0 이상으로 돌아온다.
+      return ((v % limit) + limit) % limit;
+    case "mirror": {
+      // 길이가 1이면 대칭시킬 안쪽 픽셀이 없으므로 유일한 좌표 0만 돌려준다.
+      if (limit === 1) {
+        return 0;
+      }
+
+      // 가장자리 픽셀을 겹쳐 쓰지 않는 mirror의 한 주기는 0…끝…0까지인 2×(limit-1)이다.
+      // 주기 안으로 먼저 접은 뒤 후반부를 다시 뒤집으므로 아무리 먼 좌표도 반복 대칭된다.
+      const period = 2 * (limit - 1);
+      const folded = ((v % period) + period) % period;
+      return folded < limit ? folded : period - folded;
+    }
+    default: {
+      // 유니온에 네 번째 정책을 더하면 여기서 컴파일이 먼저 깨진다. 값만 늘리고 처리를
+      // 빠뜨리는 일을 타입 검사기가 막아 주므로, 정책이 늘어도 이 함수는 조용히 틀리지 않는다.
+      const exhaustive: never = policy;
+      throw new Error(`처리하지 않은 가장자리 정책: ${String(exhaustive)}`);
+    }
+  }
+}
+
+function clampCoord(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  policy: EdgePolicy,
+): readonly [number, number] {
+  return [resolveAxisCoord(x, width, policy), resolveAxisCoord(y, height, policy)];
+}
+
+function readPixel(
+  buf: ImageBuffer<"RGBA8">,
+  x: number,
+  y: number,
+): Pixel<"RGBA8"> {
+  const index = (y * buf.width + x) * 4;
+  return [buf.data[index], buf.data[index + 1], buf.data[index + 2], buf.data[index + 3]];
+}
+
+function sampleEdge(
+  buf: ImageBuffer<"RGBA8">,
+  x: number,
+  y: number,
+  policy: EdgePolicy,
+): Pixel<"RGBA8"> {
+  const [sampleX, sampleY] = clampCoord(x, y, buf.width, buf.height, policy);
+  return readPixel(buf, sampleX, sampleY);
+}
+
+// 직접 순회와 분리 순회가 실제로 가중치 곱셈을 몇 번 수행했는지 같은 카운터로 비교한다.
+let multiplyCount = 0;
+
+function resetMultiplyCount(): void {
+  multiplyCount = 0;
+}
+
+function convolve1D(
+  source: ImageBuffer<"RGBA8"> | ScratchBuffer,
+  size: number,
+  axis: ConvolveAxis,
+  edge: EdgePolicy = "clamp",
+): ScratchBuffer {
+  const out = new Float64Array(source.data.length);
+  const radius = Math.floor(size / 2);
+  // 박스 블러의 1차원 커널은 모든 자리의 무게가 같다. 평균을 뒤로 미루지 않고 가중치 자체에
+  // 담아 두면 아래 곱셈 한 번이 곧 가중치 곱셈 한 번이라, 세는 횟수가 실제 연산과 일치한다.
+  const weights = new Array<number>(size).fill(1 / size);
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+
+        for (let tap = 0; tap < size; tap += 1) {
+          const offset = tap - radius;
+          const rawX = axis === "row" ? x + offset : x;
+          const rawY = axis === "column" ? y + offset : y;
+          // 정책 유니온이 한 축의 좌표를 결정하므로 같은 순회가 clamp·wrap·mirror를 모두 쓴다.
+          const sampleX = resolveAxisCoord(rawX, source.width, edge);
+          const sampleY = resolveAxisCoord(rawY, source.height, edge);
+          const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+
+          sum += source.data[sampleIndex] * weights[tap];
+          multiplyCount += 1;
+        }
+
+        out[(y * source.width + x) * 4 + channel] = sum;
+      }
+    }
+  }
+
+  return { data: out, width: source.width, height: source.height };
+}
+
+function scratchToImage(scratch: ScratchBuffer): ImageBuffer<"RGBA8"> {
+  // Float64Array를 최종 배열 생성자에 건네는 이 지점에서 처음이자 마지막 반올림·클램핑이 일어난다.
+  return makeImageBuffer(
+    new Uint8ClampedArray(scratch.data),
+    scratch.width,
+    scratch.height,
+  );
+}
+
+// codeStep 441 — 5×5 박스 커널의 스물다섯 자리도 홀수의 제곱이라 Kernel 검사를 그대로 통과한다.
+// 가중치가 모두 1이고 divisor가 25이므로, 이 커널을 한 번에 적용하는 것이 곧 5×5 평균이다.
+const boxKernel5x5: Kernel<
+  readonly [
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+  ]
+> = {
+  weights: [
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+  ],
+  side: 5,
+  divisor: 25,
+};
+
+// codeStep 441 — 검사를 통과한 정사각 커널을 각 픽셀 중앙에 놓고 한 번에 적용하는 일반 순회다.
+// 분리 경로와 곱셈 횟수를 대조하려고 여기서 먼저 만들고, 뒤에서 가우시안·샤픈이 그대로 재사용한다.
+function convolve(
+  source: ImageBuffer<"RGBA8">,
+  kernel: KernelShape<readonly number[]>,
+  edge: EdgePolicy = "clamp",
+): ImageBuffer<"RGBA8"> {
+  const out = new Uint8ClampedArray(source.data.length);
+  const radius = Math.floor(kernel.side / 2);
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+
+        for (let kernelY = 0; kernelY < kernel.side; kernelY += 1) {
+          for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
+            const sampleX = resolveAxisCoord(x + kernelX - radius, source.width, edge);
+            const sampleY = resolveAxisCoord(y + kernelY - radius, source.height, edge);
+            const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+            const weightIndex = kernelY * kernel.side + kernelX;
+
+            sum += source.data[sampleIndex] * kernel.weights[weightIndex];
+            multiplyCount += 1;
+          }
+        }
+
+        // 실수 누적값을 모두 구한 뒤 Uint8ClampedArray에 쓰는 이 순간 한 번만 반올림·클램핑한다.
+        out[(y * source.width + x) * 4 + channel] = sum / kernel.divisor;
+      }
+    }
+  }
+
+  return makeImageBuffer(out, source.width, source.height);
+}
+
+function boxBlurSeparable(
+  buf: ImageBuffer<"RGBA8">,
+  size: number,
+  edge: EdgePolicy = "clamp",
+): ImageBuffer<"RGBA8"> {
+  const rows = convolve1D(buf, size, "row", edge);
+  const columns = convolve1D(rows, size, "column", edge);
+  return scratchToImage(columns);
+}
+
+function maxChannelDifference(
+  a: ImageBuffer<"RGBA8">,
+  b: ImageBuffer<"RGBA8">,
+): number {
+  let maxDifference = 0;
+
+  for (let i = 0; i < a.data.length; i += 1) {
+    maxDifference = Math.max(maxDifference, Math.abs(a.data[i] - b.data[i]));
+  }
+
+  return maxDifference;
+}
+
+// codeStep 443 — 정수 리터럴 가중치를 그대로 두어 Kernel의 튜플 길이 검사를 보존한다.
+// 1+2+1+2+4+2+1+2+1은 16이므로 마지막에 divisor 16으로 나누면 밝기 총량이 유지된다.
+const gaussianKernel: Kernel<readonly [1, 2, 1, 2, 4, 2, 1, 2, 1]> = {
+  weights: [1, 2, 1, 2, 4, 2, 1, 2, 1],
+  side: 3,
+  divisor: 16,
+};
+
+// codeStep 443 — 샤픈 가중치 합은 1이라 이웃과의 차이를 키워도 전체 밝기 총량은 보존된다.
+const sharpenKernel: Kernel<readonly [0, -1, 0, -1, 5, -1, 0, -1, 0]> = {
+  weights: [0, -1, 0, -1, 5, -1, 0, -1, 0],
+  side: 3,
+  divisor: 1,
+};
+
+// codeStep 443 — 아직 읽지 않은 이웃을 덮어쓰면 순회 뒤쪽 결과가 오염됨을 5×1 버퍼로 보인다.
+function inPlaceCorruptionDemo(): string {
+  const data = new Uint8ClampedArray(5 * 4);
+
+  for (let x = 0; x < 5; x += 1) {
+    data[x * 4 + 3] = 255;
+  }
+  data[2 * 4] = 255;
+
+  const source: ImageBuffer<"RGBA8"> = makeImageBuffer(data, 5, 1);
+  const correct = boxBlurSeparable(source, 3);
+  const correctRed = Array.from({ length: 5 }, (_, x) => correct.data[x * 4]);
+
+  // 잘못된 경로는 별도 출력 배열 없이 왼쪽부터 원본 빨강 채널 자리에 평균을 즉시 쓴다.
+  // x=2부터는 왼쪽 이웃의 원래 0 대신 앞 순회가 써 버린 85를 읽어 113,38,13으로 번진다.
+  const corrupted = new Uint8ClampedArray(source.data);
+  for (let x = 0; x < 5; x += 1) {
+    let sum = 0;
+    for (let offset = -1; offset <= 1; offset += 1) {
+      const sampleX = resolveAxisCoord(x + offset, 5, "clamp");
+      sum += corrupted[sampleX * 4];
+    }
+    corrupted[x * 4] = sum / 3;
+  }
+  const corruptedRed = Array.from({ length: 5 }, (_, x) => corrupted[x * 4]);
+
+  return `정상 ${correctRed.join(",")} / 오염 ${corruptedRed.join(",")}`;
+}
+
 // codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
 function clampingContrast(): string {
   const clamped = new Uint8ClampedArray(2);
@@ -628,6 +994,68 @@ function main(): void {
   saveImage("threshold", thresholdStage(128).run(decodedImage));
   saveImage("saturate-0", saturateStage(0).run(decodedImage));
   saveImage("saturate-1.8", saturateStage(1.8).run(decodedImage));
+
+  // codeStep 440 — 리터럴 튜플의 길이 9가 3×3 커널의 런타임 값에도 그대로 대응한다.
+  console.log(
+    `커널 3x3 길이=${boxKernel3x3.weights.length} side=${boxKernel3x3.side} ` +
+      `divisor=${boxKernel3x3.divisor}`,
+  );
+
+  // codeStep 441 — 검사된 5×5 커널을 한 번에 적용하는 순회와 1×5·5×1 분리 순회를
+  // 같은 실제 PNG로 비교한다. 결과는 같고 곱셈 횟수만 달라야 한다.
+  resetMultiplyCount();
+  const directBoxBlur = convolve(decodedImage, boxKernel5x5);
+  const directMultiplyCount = multiplyCount;
+  resetMultiplyCount();
+  const separableBoxBlur = boxBlurSeparable(decodedImage, 5);
+  const separableMultiplyCount = multiplyCount;
+  console.log(
+    `박스 블러 5x5 곱셈 직접 ${directMultiplyCount} (픽셀·채널당 25) / ` +
+      `분리 ${separableMultiplyCount} (10) / ` +
+      `최대 채널 차이 ${maxChannelDifference(directBoxBlur, separableBoxBlur)}`,
+  );
+
+  // codeStep 442 — x=-1은 clamp면 첫 픽셀, wrap이면 마지막, mirror면 두 번째 픽셀이 된다.
+  console.log(
+    `가장자리 샘플 clamp ${Array.from(sampleEdge(decodedImage, -1, 0, "clamp"))} / ` +
+      `wrap ${Array.from(sampleEdge(decodedImage, -1, 0, "wrap"))} / ` +
+      `mirror ${Array.from(sampleEdge(decodedImage, -1, 0, "mirror"))}`,
+  );
+  const clampBoxBlur = boxBlurSeparable(decodedImage, 5, "clamp");
+  const wrapBoxBlur = boxBlurSeparable(decodedImage, 5, "wrap");
+  console.log(
+    `가장자리 정책 차이 clamp vs wrap 최대 채널 차이 ` +
+      `${maxChannelDifference(clampBoxBlur, wrapBoxBlur)}`,
+  );
+
+  // codeStep 443 — 1×1은 모든 이웃이 자기 자신이라 효과 차이가 사라지므로 3×3을 사용한다.
+  // 중앙만 [200,120,40]이고 나머지는 검정이다. 가우시안 중앙 가중치 4를 divisor 16으로
+  // 나누면 [50,30,10], 샤픈은 중앙을 5배 해 [1000,600,200]이 8비트에서 [255,255,200]이 된다.
+  const impulseData = new Uint8ClampedArray(3 * 3 * 4);
+  for (let pixel = 0; pixel < 9; pixel += 1) {
+    impulseData[pixel * 4 + 3] = 255;
+  }
+  impulseData.set([200, 120, 40, 255], (1 * 3 + 1) * 4);
+  const impulseImage: ImageBuffer<"RGBA8"> = makeImageBuffer(impulseData, 3, 3);
+  const gaussianImage = gaussianBlurStage().run(impulseImage);
+  const sharpenedImage = sharpenStage().run(impulseImage);
+  console.log(`가우시안 픽셀 ${Array.from(readPixel(gaussianImage, 1, 1))}`);
+  console.log(`샤픈 픽셀 ${Array.from(readPixel(sharpenedImage, 1, 1))}`);
+
+  // plan 배열에는 넣지 않고 이번 화의 세 스테이지만 별도 목록으로 만들어 기존 출력을 보존한다.
+  const convolutionPlan: readonly ConvolveStage[] = [
+    boxBlurStage(5),
+    gaussianBlurStage(),
+    sharpenStage(),
+  ];
+  console.log(`컨볼루션 계획 ${convolutionPlan.map(describeStage).join(" · ")}`);
+
+  // 정상 경로와 제자리 덮어쓰기 경로의 두 줄을 한 데모 문자열로 받아 오염의 진행을 나란히 본다.
+  console.log(`스크래치 버퍼 ${inPlaceCorruptionDemo()}`);
+
+  saveImage("box-blur", separableBoxBlur);
+  saveImage("gaussian", gaussianBlurStage().run(decodedImage));
+  saveImage("sharpen", sharpenStage().run(decodedImage));
 }
 
 main();
