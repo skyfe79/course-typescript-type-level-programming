@@ -383,7 +383,7 @@ function flipStage(direction: Direction): FlipStage {
             source.height,
             direction,
           );
-          copyPixel(source, sourceX, sourceY, out, x, y);
+          copyPixel(source, sourceX, sourceY, out, source.width, x, y);
         }
       }
 
@@ -745,14 +745,35 @@ function copyPixel(
   sourceX: number,
   sourceY: number,
   target: Uint8ClampedArray,
+  targetWidth: number,
   targetX: number,
   targetY: number,
 ): void {
   const pixel = readPixel(source, sourceX, sourceY);
   // 읽을 때와 쓸 때 모두 같은 pixelIndex를 지난다. 두 자리에서 오프셋 계산이 어긋날 수 없다.
-  // 플립은 너비와 높이를 바꾸지 않아 원본과 대상의 격자 모양이 같으므로 source.width를 쓴다.
-  // 다음 화의 회전처럼 크기가 뒤바뀌면 이 자리에 대상 너비를 따로 받아야 한다.
-  target.set(pixel, pixelIndex(source.width, targetX, targetY));
+  // 회전은 원본의 높이가 대상의 너비가 되므로, 쓰기 오프셋은 원본 너비에 기대지 않고
+  // 호출자가 넘긴 대상 너비로 계산한다. 플립은 두 너비가 같아 기존 동작을 그대로 유지한다.
+  target.set(pixel, pixelIndex(targetWidth, targetX, targetY));
+}
+
+// codeStep 446 — 90도 회전은 픽셀 포맷과 바이트 수를 보존하지만 너비와 높이를 맞바꾼다.
+// 스테이지 유니온에는 넣지 않고 평범한 함수로 두어, 크기를 보존하는 플립과 역할을 구분한다.
+function rotate90(buf: ImageBuffer<"RGBA8">): ImageBuffer<"RGBA8"> {
+  const outWidth = buf.height;
+  const outHeight = buf.width;
+  const out = new Uint8ClampedArray(buf.data.length);
+
+  // 결과 좌표를 차례로 돌며 그 자리에 들어올 원본 좌표를 역으로 찾는다. 결과의 ox는
+  // 원본 높이 범위를 도므로 y를 뒤집을 때도 buf.height에서 빼야 직사각형에서 범위를 벗어나지 않는다.
+  for (let oy = 0; oy < outHeight; oy += 1) {
+    for (let ox = 0; ox < outWidth; ox += 1) {
+      const sourceX = oy;
+      const sourceY = buf.height - 1 - ox;
+      copyPixel(buf, sourceX, sourceY, out, outWidth, ox, oy);
+    }
+  }
+
+  return makeImageBuffer(out, outWidth, outHeight);
 }
 
 function sampleEdge(
@@ -1159,6 +1180,22 @@ function main(): void {
     `플립 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
       `${horizontalFlipped.width}x${horizontalFlipped.height} ` +
       `bytes=${decodedImage.data.length} -> ${horizontalFlipped.data.length}`,
+  );
+
+  // codeStep 446 — 3×2 비대칭 버퍼를 시계 방향으로 돌리면 왼쪽 아래의 40부터 새 첫 행이 된다.
+  // 빨강 채널 여섯 개를 한 줄에 놓아 좌표 공식과 2×3 결과를 손으로 바로 대조할 수 있게 한다.
+  const rotatedAsymmetric = rotate90(asymmetricImage);
+  console.log(
+    `회전 3x2 빨강 원본 ${redChannels(asymmetricImage)} / ` +
+      `90도 ${redChannels(rotatedAsymmetric)}`,
+  );
+
+  // 실제 PNG도 같은 함수를 지나면 너비와 높이만 맞바뀌고 전체 픽셀 바이트 수는 그대로다.
+  const rotatedDecoded = rotate90(decodedImage);
+  console.log(
+    `회전 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${rotatedDecoded.width}x${rotatedDecoded.height} ` +
+      `bytes=${decodedImage.data.length} -> ${rotatedDecoded.data.length}`,
   );
 }
 
