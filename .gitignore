@@ -52,6 +52,8 @@ projects/ledger/journal.json
 projects/ledger/run-log.json
 # 강의 실습 산출물 (imgfx — PNG 코덱 왕복으로 만드는 복사본)
 projects/imgfx/copy.png
+# codeStep 455의 CLI가 -o로 만드는 실행 결과물이며 소스가 아닙니다.
+projects/imgfx/out.png
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

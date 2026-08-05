@@ -1374,6 +1374,9 @@ const FLAG_SPEC = {
     arity: 0,
     build: () => invertStage(),
   },
+  // codeStep 455 — grayscaleStage는 RGBA8을 Gray8로 바꾸므로 뒤의 blur가 요구하는 RGBA8과
+  // 이어지지 않고, 마지막 Gray8도 colorType 6으로 인코딩할 수 없다. saturateStage(0)은 화면상
+  // 같은 회색을 만들면서 RGBA8을 유지해, "회색으로 만들기"를 포맷에 맞는 체인으로 완성한다.
   "--grayscale": {
     arity: 0,
     build: () => grayscaleStage(),
@@ -1750,10 +1753,12 @@ function runCli(argv: readonly string[]): void {
     // 반환값만 믿지 않고 방금 쓴 파일을 다시 열어, 디스크의 결과가 실제 PNG인지와 크기를 확인한다.
     const writtenBytes = readFileSync(options.output);
     const outputPng = PNG.sync.read(writtenBytes);
+    // 회전은 픽셀 수를 바꾸지 않아도 PNG 압축 결과의 바이트 수는 크게 달라질 수 있으므로,
+    // 원본과 결과를 한 줄에서 나란히 비교한다.
     console.log(
       `CLI 실행 ${options.output} / 디코딩 ${decodeCount} / 인코딩 ${encodeCount} / ` +
         `크기 ${inputPng.width}x${inputPng.height} -> ${outputPng.width}x${outputPng.height} / ` +
-        `바이트 ${writtenBytes.length}`,
+        `바이트 ${inputBytes.length} -> ${writtenBytes.length}`,
     );
   }
 }

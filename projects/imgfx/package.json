@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "PNG 필터 체인 라이브러리 & CLI (§30 프로젝트)입니다.",
+  "scripts": {
+    "demo": "node imgfx.ts apply photo.png --saturate 0 --blur 3 --contrast 20 --rotate 90 --flip h -o out.png"
+  },
   "dependencies": {
     "pngjs": "^7.0.0"
   },
