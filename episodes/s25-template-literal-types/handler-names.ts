@@ -9,6 +9,7 @@ interface InteractionState {
   click: boolean;
   hover: boolean;
   focus: boolean;
+  drag: boolean;
 }
 
 // 타입과 같은 모양의 값을 만들어 타입 공간의 키가 런타임에서는 어떤 값인지 함께 살펴본다.
@@ -16,6 +17,7 @@ const state: InteractionState = {
   click: false,
   hover: false,
   focus: false,
+  drag: false,
 };
 
 // Object.keys는 state가 실제로 가진 키 목록을 배열로 돌려준다.
@@ -32,10 +34,10 @@ type HandlerNames = HandlerName<keyof InteractionState>;
 // Eq는 두 타입이 정확히 같은지를 판별해 편집기의 호버 결과를 컴파일러 검사로도 고정한다.
 type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
 
-// 세 상태 키가 빠짐없이 onClick, onHover, onFocus로 바뀌었는지 확인한다.
+// 상태 모양이 커졌으니 기대값도 함께 키워 네 상태 키가 빠짐없이 핸들러 이름으로 바뀌었는지 확인한다.
 const handlerNamesMatchState: Eq<
   HandlerNames,
-  "onClick" | "onHover" | "onFocus"
+  "onClick" | "onHover" | "onFocus" | "onDrag"
 > = true;
 
 // 값 공간에는 Capitalize 함수가 없으므로 첫 글자를 직접 대문자로 바꾸고 나머지 문자열을 이어 붙인다.
@@ -48,5 +50,14 @@ function toHandlerName(key: string): string {
 for (const key of Object.keys(state)) {
   console.log(toHandlerName(key));
 }
+
+// codeStep 356 — 새로운 상태 키 추가하고 결과 확인하기
+
+// HandlerName과 HandlerNames를 고치지 않아도 새 drag 키에서 onDrag가 자동으로 만들어진다.
+// @ts-expect-error - onDrag가 더해졌으므로 HandlerNames는 이전의 세 멤버 유니온과 같지 않다
+const handlerNamesIncludeDrag: Eq<
+  HandlerNames,
+  "onClick" | "onHover" | "onFocus"
+> = true;
 
 export {};
