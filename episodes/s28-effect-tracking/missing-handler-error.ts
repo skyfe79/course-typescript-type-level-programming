@@ -49,6 +49,14 @@ class Program<A, E extends EffectName> {
       Exclude<E, K>
     >;
   }
+
+  // codeStep 411 — run() 호출로 컴파일 에러 읽기
+
+  // 다형 this 매개변수다. E가 never로 좁혀진 Program만 this 자리에 들어올 수 있으므로,
+  // 아직 처리되지 않은 이펙트가 하나라도 남아 있으면 호출 자체가 거부된다.
+  run(this: Program<A, never>): A {
+    return this.thunk();
+  }
 }
 
 // 두 타입이 정확히 같은지 판별한다. true를 상수에 대입하면 타입 주장이 계속 검사된다.
@@ -77,5 +85,28 @@ const handledKeepsOnlyFetchUrl: Eq<
   typeof handled,
   Program<string, "fetchUrl">
 > = true;
+
+// fetchUrl 하나가 남은 상태에서 run()을 부르면 무슨 일이 일어나는지 확인한다.
+function tryRunWithFetchUrlUnhandled(): void {
+  // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
+  // @ts-expect-error - fetchUrl 이펙트가 아직 처리되지 않아 E가 never로 좁혀지지 않았다
+  handled.run();
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s28-effect-tracking/missing-handler-error.ts(92,3): error TS2684: The 'this' context of type 'Program<string, "fetchUrl">' is not assignable to method's 'this' of type 'Program<string, never>'.
+  //   Type '"fetchUrl"' is not assignable to type 'never'.
+}
+
+// 핸들러를 하나도 붙이지 않으면 에러 메시지에 남은 세 이름이 함께 나타난다.
+function tryRunWithNothingHandled(): void {
+  // @ts-expect-error - 세 이펙트를 하나도 처리하지 않아 E가 never로 좁혀지지 않았다
+  report.run();
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s28-effect-tracking/missing-handler-error.ts(101,3): error TS2684: The 'this' context of type 'Program<string, "fetchUrl" | "readFile" | "writeLog">' is not assignable to method's 'this' of type 'Program<string, never>'.
+  //   Type '"fetchUrl" | "readFile" | "writeLog"' is not assignable to type 'never'.
+  //     Type '"fetchUrl"' is not assignable to type 'never'.
+}
+
+// 두 @ts-expect-error는 오류가 실제로 나야만 통과한다. 거부 규칙이 그대로 지켜지는지가 계속 검사된다.
+console.log("컴파일 에러 확인: 남은 이펙트가 있으면 run()을 호출할 수 없습니다.");
 
 export {};
