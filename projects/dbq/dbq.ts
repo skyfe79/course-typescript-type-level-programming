@@ -219,4 +219,21 @@ const whereThenSelectMatch: Eq<
 // 전달하지 않으면 where(...).select(...)에서 오류 없이 조건만 조용히 사라진다.
 // rows가 이 조건 배열로 실제 행을 거르는 동작은 codeStep 378에서 추가한다.
 
+// codeStep 377 — 불리언 컬럼에 > 연산자를 써서 에러 확인하기
+
+// 이 화 도입에서 아무 제지 없이 통과하던 바로 그 호출이 이제 컴파일 단계에서 막힌다.
+// 오류가 나는 자리는 두 번째 인자인 연산자이고, 컬럼 이름 "isActive" 자체는 올바르다.
+// isActive가 boolean이므로 ColumnOperators<UsersSchema, "isActive">는 "=" | "!="로 계산되고,
+// ">"는 그 유니온에 속하지 않는다.
+// 이 저장소는 태그 시점마다 npx tsc --noEmit이 0 오류여야 하므로 일부러 틀린 코드는
+// `@ts-expect-error`로 소비해 오류를 이 한 줄에 가둔다. 이 호출이 언젠가 오류가 아니게 되면
+// 해당 지시어 자체가 사용되지 않았다는 오류를 내므로 타입 규칙이 달라졌다는 사실도 알 수 있다.
+// @ts-expect-error - error TS2345: Argument of type '">"' is not assignable to parameter of type '"!=" | "="'.
+from("users").where("isActive", ">", true);
+
+// 같은 컬럼을 그대로 두고 연산자 하나만 "="로 바꾸면 통과한다. 따라서 문제는 컬럼 이름이
+// 아니라 연산자 하나뿐이라는 사실을 바로 아래 호출과 Eq 단언이 함께 증명한다.
+const activeExactly = from("users").where("isActive", "=", true);
+const activeExactlyMatch: Eq<typeof activeExactly, QueryBuilder<UsersSchema, []>> = true;
+
 export {};
