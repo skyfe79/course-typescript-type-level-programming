@@ -1,4 +1,5 @@
-// imgfx — PNG 코덱 계층을 만들고, 읽기와 쓰기를 colorType 6 / 비트 깊이 8로 고정한다.
+// imgfx — 파이프라인이 주고받을 핵심 데이터 타입 ImageBuffer<Format>을 정의하고,
+// 포맷을 값이 아니라 팬텀 타입 매개변수로 들고 다니게 만든다.
 // 실행: node projects/imgfx/imgfx.ts
 // 검사: npx tsc --noEmit
 //
@@ -12,6 +13,30 @@
 // colorType: 6도 0 | 2 | 4 | 6 중 하나로 검사된다.
 import { PNG } from "pngjs";
 import { readFileSync, writeFileSync } from "node:fs";
+
+// 이미지 스테이지가 주고받을 수 있는 픽셀 포맷을 하나의 닫힌 집합으로 고정한다.
+// 각 태그는 지난 시간에 고정한 PNG colorType과 정확히 하나씩 짝지어진다: RGBA8→6, RGB8→2, Gray8→0.
+type PixelFormat = "RGBA8" | "RGB8" | "Gray8";
+
+interface ImageBuffer<Format extends PixelFormat> {
+  readonly data: Uint8ClampedArray;
+  readonly width: number;
+  readonly height: number;
+  /** 타입에만 존재하는 표시. 실제 객체엔 절대 채우지 않는다 — 그래서 팬텀(phantom)이다. */
+  readonly __format?: Format;
+}
+
+function makeImageBuffer<Format extends PixelFormat>(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): ImageBuffer<Format> {
+  // __format이 옵셔널이라 값을 넣지 않아도 구조적으로 ImageBuffer를 만족한다.
+  // 포맷 정보는 런타임 객체를 더럽히지 않고 타입 검사에만 남는다.
+  return { data, width, height };
+}
+
+const rgba: ImageBuffer<"RGBA8"> = makeImageBuffer(new Uint8ClampedArray(4), 1, 1);
 
 // 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
 const INPUT_URL = new URL("./photo.png", import.meta.url);
@@ -38,7 +63,22 @@ function writePng(
 }
 
 function main(): void {
+  // 직렬화 결과에는 data·width·height만 있고 타입 전용 팬텀 필드 __format은 어디에도 없다.
+  console.log(JSON.stringify(rgba));
+
   const decoded = readPng(INPUT_URL);
+
+  // pngjs가 돌려주는 Buffer도 Uint8Array 계열이지만 ImageBuffer는 픽셀 연산에 쓸
+  // Uint8ClampedArray를 요구하므로, 코덱과 파이프라인 경계에서 한 번만 복사해 표현을 맞춘다.
+  const decodedImage: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray(decoded.data),
+    decoded.width,
+    decoded.height,
+  );
+  console.log(
+    `ImageBuffer RGBA8 ${decodedImage.width}x${decodedImage.height} bytes=${decodedImage.data.length}`,
+  );
+
   writePng(OUTPUT_URL, decoded.width, decoded.height, decoded.data);
 
   // 방금 쓴 파일을 같은 함수로 다시 읽는다. 두 줄이 똑같이 찍히면 왕복이 성립한 것이다.
