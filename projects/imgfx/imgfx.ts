@@ -370,6 +370,23 @@ const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
     a,
   ];
 
+// codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
+function clampingContrast(): string {
+  const clamped = new Uint8ClampedArray(2);
+  const wrapped = new Uint8Array(2);
+
+  // Clamped 배열은 이미지 채널에 알맞게 0~255로 자르고, 일반 Uint8 배열은 256을 기준으로 감싼다.
+  clamped[0] = 280;
+  clamped[1] = -20;
+  wrapped[0] = 280;
+  wrapped[1] = -20;
+
+  return (
+    `Uint8ClampedArray 280→${clamped[0]}, -20→${clamped[1]} / ` +
+    `Uint8Array 280→${wrapped[0]}, -20→${wrapped[1]}`
+  );
+}
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -432,6 +449,24 @@ function main(): void {
   console.log(`반전 픽셀 ${Array.from(invertStage().run(samplePixel).data)}`);
   console.log(`밝기 50 픽셀 ${Array.from(brightnessStage(50).run(samplePixel).data)}`);
   console.log(`대비 1.5 픽셀 ${Array.from(contrastStage(1.5).run(samplePixel).data)}`);
+
+  // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
+  // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
+  // 나머지 두 채널은 그대로 더해지므로, 잘린 자리가 어디인지 출력에서 바로 가려진다.
+  const brightPixel: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray([230, 10, 40, 255]),
+    1,
+    1,
+  );
+  console.log(`밝기 50 넘침 픽셀 ${Array.from(brightnessStage(50).run(brightPixel).data)}`);
+  console.log(`클램핑 대조 ${clampingContrast()}`);
+
+  const decodedGrayscale = grayscaleStage().run(decodedImage);
+  console.log(
+    `실제 PNG 그레이스케일 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${decodedGrayscale.width}x${decodedGrayscale.height} bytes=${decodedImage.data.length} -> ` +
+      `${decodedGrayscale.data.length}`,
+  );
 }
 
 main();
