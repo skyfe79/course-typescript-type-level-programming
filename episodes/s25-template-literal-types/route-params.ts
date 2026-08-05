@@ -30,4 +30,27 @@ type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1
 
 const segmentsMatch: Eq<Segments, ["users", ":id", "posts", ":postId"]> = true;
 
+// codeStep 365 — `:id` 같은 파라미터 세그먼트를 객체 키로 모으기
+
+// ParamNames는 세그먼트 튜플을 Head와 Rest로 나누어 머리부터 꼬리까지 걷는 재귀 타입이다.
+// Head가 콜론으로 시작하면 콜론 뒤의 Name을 추출해 나머지 결과와 유니온으로 합친다.
+// 콜론이 붙지 않은 일반 세그먼트는 유니온에 아무것도 더하지 않고 Rest로 그냥 지나간다.
+type ParamNames<Segs extends readonly string[]> =
+  Segs extends readonly [infer Head extends string, ...infer Rest extends readonly string[]]
+    ? Head extends `:${infer Name}`
+      ? Name | ParamNames<Rest>
+      : ParamNames<Rest>
+    : never;
+
+// 더 걸을 세그먼트가 없을 때 never를 반환하는 이유는 유니온에서 never가 아무것도 더하지 않는 항등원이기 때문이다.
+// ParseParams는 추출한 이름 유니온을 키로 순회하는 매핑된 타입이며 각 파라미터 값은 string으로 정한다.
+// 파라미터가 없으면 키 유니온이 never가 되므로 매핑할 프로퍼티가 없어 결과는 빈 객체 타입 {}가 된다.
+type ParseParams<S extends string> = {
+  [K in ParamNames<PathSegments<S>>]: string;
+};
+
+type Params = ParseParams<typeof route>;
+
+const paramsMatch: Eq<Params, { id: string; postId: string }> = true;
+
 export {};
