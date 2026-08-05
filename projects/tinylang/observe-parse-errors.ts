@@ -15,7 +15,7 @@ function describeExpr(expr: Expr): string {
     case "unary":
       return `unary(${expr.operator}, ${describeExpr(expr.operand)})`;
     case "call":
-      return `call(${expr.callee}, ${expr.args.map(describeExpr).join(", ")})`;
+      return `call(${expr.callee}${expr.args.length === 0 ? "" : `, ${expr.args.map(describeExpr).join(", ")}`})`;
   }
 }
 
