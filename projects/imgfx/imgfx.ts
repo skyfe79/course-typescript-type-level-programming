@@ -151,6 +151,15 @@ interface SaturateStage extends PixelStage<"saturate", "RGBA8", "RGBA8"> {
   readonly factor: number;
 }
 
+// codeStep 443 — 컨볼루션 셋은 모두 이웃을 읽으므로 실행기 관점에서는 kind 하나로 묶는다.
+// 실제 효과는 effect가 가르고, side와 edge만 보면 실행 전에 필요한 작업 범위도 설명할 수 있다.
+// 이 계열만 스크래치 버퍼가 필요하다는 판정도 kind === "convolve" 하나로 끝난다.
+interface ConvolveStage extends PixelStage<"convolve", "RGBA8", "RGBA8"> {
+  readonly effect: "box" | "gaussian" | "sharpen";
+  readonly side: number;
+  readonly edge: EdgePolicy;
+}
+
 // 모든 스테이지를 하나의 판별 유니온으로 모으면 kind를 확인할 때 나머지 필드도 함께 좁혀진다.
 type AnyStage =
   | InvertStage
@@ -158,7 +167,8 @@ type AnyStage =
   | BrightnessStage
   | ContrastStage
   | ThresholdStage
-  | SaturateStage;
+  | SaturateStage
+  | ConvolveStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
@@ -237,6 +247,50 @@ function saturateStage(factor: number): SaturateStage {
   };
 }
 
+// codeStep 443 — 박스 블러의 크기는 스테이지를 만드는 순간 검사해 잘못된 계획 생성을 막는다.
+function boxBlurStage(size: number, edge: EdgePolicy = "clamp"): ConvolveStage {
+  // NaN과 Infinity는 정수·홀수 검사만 믿지 않고 Number.isFinite에서 먼저 거른다.
+  if (!Number.isFinite(size) || !Number.isInteger(size) || size < 1 || size % 2 === 0) {
+    throw new Error(`box blur size는 1 이상의 유한한 홀수 정수여야 합니다: ${size}`);
+  }
+
+  return {
+    kind: "convolve",
+    effect: "box",
+    side: size,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => boxBlurSeparable(buf, size, edge),
+  };
+}
+
+// codeStep 443 — 이름이 gaussianKernel ↔ gaussianBlurStage로 짝지어져 값과 스테이지를 구분한다.
+function gaussianBlurStage(edge: EdgePolicy = "clamp"): ConvolveStage {
+  return {
+    kind: "convolve",
+    effect: "gaussian",
+    side: gaussianKernel.side,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => convolve(buf, gaussianKernel, edge),
+  };
+}
+
+// codeStep 443 — 샤픈도 같은 일반 순회를 쓰고 커널 값만 바꾸는 스테이지다.
+function sharpenStage(edge: EdgePolicy = "clamp"): ConvolveStage {
+  return {
+    kind: "convolve",
+    effect: "sharpen",
+    side: sharpenKernel.side,
+    edge,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => convolve(buf, sharpenKernel, edge),
+  };
+}
+
 // codeStep 439 — 두 생성자가 실행보다 먼저 실패한다는 사실을 한 줄의 실행 결과로 관찰한다.
 function rejectedStageDemo(): string {
   const messages: string[] = [];
@@ -257,6 +311,14 @@ function rejectedStageDemo(): string {
     // 명령줄 인자를 Number로 바꾸다 실패하면 예외가 아니라 NaN이 돌아온다.
     // 크기 비교만으로 걸렀다면 이 값이 그대로 커널까지 흘러 들어갔을 자리다.
     thresholdStage(Number("128px"));
+  } catch (error) {
+    messages.push(error instanceof Error ? error.message : String(error));
+  }
+
+  // codeStep 443 — 컨볼루션 스테이지도 같은 규약을 따른다. 커널 크기는 홀수여야 중심이
+  // 하나로 정해지므로, 짝수 4는 이미지를 한 번도 읽기 전에 여기서 거부된다.
+  try {
+    boxBlurStage(4);
   } catch (error) {
     messages.push(error instanceof Error ? error.message : String(error));
   }
@@ -284,6 +346,9 @@ function describeStage(stage: AnyStage): string {
     // codeStep 438 — 채도도 factor까지 읽어 계획을 설명한다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — 실행기에게는 컨볼루션 하나이고, 효과와 크기는 스테이지 데이터가 설명한다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     default: {
       // 모든 case를 처리했다면 이 지점의 stage에는 가능한 값이 없어 never로 좁혀진다.
       const exhaustive: never = stage;
@@ -319,6 +384,9 @@ function describeStageMissingFlip(stage: AnyStageWithFlip): string {
     // codeStep 438 — saturate까지 처리해야 default에 FlipStage만 남는다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — 여기까지 처리하면 의도대로 default에는 계속 FlipStage 하나만 남는다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     default: {
       // flip을 처리하지 않았으므로 여기의 stage는 FlipStage로 남아 never에 대입할 수 없다.
       // @ts-expect-error — flip을 처리하지 않아 stage가 FlipStage로 남는다
@@ -345,6 +413,9 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
     // codeStep 438 — 모든 종류를 처리해야 default가 다시 never로 좁혀진다.
     case "saturate":
       return `채도 ${stage.factor}`;
+    // codeStep 443 — flip을 아는 실행기도 새 컨볼루션 종류를 빠뜨리지 않는다.
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     case "flip":
       return "뒤집기";
     default: {
@@ -749,6 +820,50 @@ function maxChannelDifference(
   return maxDifference;
 }
 
+// codeStep 443 — 정수 리터럴 가중치를 그대로 두어 Kernel의 튜플 길이 검사를 보존한다.
+// 1+2+1+2+4+2+1+2+1은 16이므로 마지막에 divisor 16으로 나누면 밝기 총량이 유지된다.
+const gaussianKernel: Kernel<readonly [1, 2, 1, 2, 4, 2, 1, 2, 1]> = {
+  weights: [1, 2, 1, 2, 4, 2, 1, 2, 1],
+  side: 3,
+  divisor: 16,
+};
+
+// codeStep 443 — 샤픈 가중치 합은 1이라 이웃과의 차이를 키워도 전체 밝기 총량은 보존된다.
+const sharpenKernel: Kernel<readonly [0, -1, 0, -1, 5, -1, 0, -1, 0]> = {
+  weights: [0, -1, 0, -1, 5, -1, 0, -1, 0],
+  side: 3,
+  divisor: 1,
+};
+
+// codeStep 443 — 아직 읽지 않은 이웃을 덮어쓰면 순회 뒤쪽 결과가 오염됨을 5×1 버퍼로 보인다.
+function inPlaceCorruptionDemo(): string {
+  const data = new Uint8ClampedArray(5 * 4);
+
+  for (let x = 0; x < 5; x += 1) {
+    data[x * 4 + 3] = 255;
+  }
+  data[2 * 4] = 255;
+
+  const source: ImageBuffer<"RGBA8"> = makeImageBuffer(data, 5, 1);
+  const correct = boxBlurSeparable(source, 3);
+  const correctRed = Array.from({ length: 5 }, (_, x) => correct.data[x * 4]);
+
+  // 잘못된 경로는 별도 출력 배열 없이 왼쪽부터 원본 빨강 채널 자리에 평균을 즉시 쓴다.
+  // x=2부터는 왼쪽 이웃의 원래 0 대신 앞 순회가 써 버린 85를 읽어 113,38,13으로 번진다.
+  const corrupted = new Uint8ClampedArray(source.data);
+  for (let x = 0; x < 5; x += 1) {
+    let sum = 0;
+    for (let offset = -1; offset <= 1; offset += 1) {
+      const sampleX = resolveAxisCoord(x + offset, 5, "clamp");
+      sum += corrupted[sampleX * 4];
+    }
+    corrupted[x * 4] = sum / 3;
+  }
+  const corruptedRed = Array.from({ length: 5 }, (_, x) => corrupted[x * 4]);
+
+  return `정상 ${correctRed.join(",")} / 오염 ${corruptedRed.join(",")}`;
+}
+
 // codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
 function clampingContrast(): string {
   const clamped = new Uint8ClampedArray(2);
@@ -895,6 +1010,30 @@ function main(): void {
       `${maxChannelDifference(clampBoxBlur, wrapBoxBlur)}`,
   );
 
+  // codeStep 443 — 1×1은 모든 이웃이 자기 자신이라 효과 차이가 사라지므로 3×3을 사용한다.
+  // 중앙만 [200,120,40]이고 나머지는 검정이다. 가우시안 중앙 가중치 4를 divisor 16으로
+  // 나누면 [50,30,10], 샤픈은 중앙을 5배 해 [1000,600,200]이 8비트에서 [255,255,200]이 된다.
+  const impulseData = new Uint8ClampedArray(3 * 3 * 4);
+  for (let pixel = 0; pixel < 9; pixel += 1) {
+    impulseData[pixel * 4 + 3] = 255;
+  }
+  impulseData.set([200, 120, 40, 255], (1 * 3 + 1) * 4);
+  const impulseImage: ImageBuffer<"RGBA8"> = makeImageBuffer(impulseData, 3, 3);
+  const gaussianImage = gaussianBlurStage().run(impulseImage);
+  const sharpenedImage = sharpenStage().run(impulseImage);
+  console.log(`가우시안 픽셀 ${Array.from(readPixel(gaussianImage, 1, 1))}`);
+  console.log(`샤픈 픽셀 ${Array.from(readPixel(sharpenedImage, 1, 1))}`);
+
+  // plan 배열에는 넣지 않고 이번 화의 세 스테이지만 별도 목록으로 만들어 기존 출력을 보존한다.
+  const convolutionPlan: readonly ConvolveStage[] = [
+    boxBlurStage(5),
+    gaussianBlurStage(),
+    sharpenStage(),
+  ];
+  console.log(`컨볼루션 계획 ${convolutionPlan.map(describeStage).join(" · ")}`);
+
+  // 정상 경로와 제자리 덮어쓰기 경로의 두 줄을 한 데모 문자열로 받아 오염의 진행을 나란히 본다.
+  console.log(`스크래치 버퍼 ${inPlaceCorruptionDemo()}`);
 }
 
 main();
