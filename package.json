@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:types": "tsc --noEmit -p tsconfig.test.json",
     "typecheck:default": "tsc -p episodes/s29-diagnostics --extendedDiagnostics",
     "typecheck:parallel": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 8",
     "typecheck:single": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 1",

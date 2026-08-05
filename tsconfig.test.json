@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  // 타입 테스트 하네스만 검사한다. 다른 화에 하네스가 생기면 이 include에 더한다.
+  "include": ["episodes/s29-diagnostics/type-tests.ts"]
+}
