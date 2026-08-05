@@ -1001,19 +1001,44 @@ function runPipeline(pngBytes: Buffer, stages: readonly ExecutableStage[]): Buff
     decoded.width,
     decoded.height,
   );
+  let currentFormat: PixelFormat = "RGBA8";
 
-  for (const stage of stages) {
-    const result = runStage(current, stage);
+  // codeStep 454 — 튜플로 받는 pipeline()은 CheckAdjacent로 인접 포맷을 컴파일 시점에 막는다.
+  // 반면 이 실행기가 받는 배열은 명령줄 문자열에서 동적으로 만들어져 원소 순서를 컴파일 시점에
+  // 알 수 없다. 그래서 같은 규칙을 실행 시점에 검사한다. 이 목록이 문자열에서 만들어지는 한
+  // 검사를 컴파일 시점으로 되돌릴 수 없으며, 아래 단언은 바로 앞의 포맷 검사로 뒷받침된다.
+  for (const [index, stage] of stages.entries()) {
+    if (currentFormat !== stage.in) {
+      throw new Error(
+        `체인의 ${index + 1}번째 스테이지(${stage.kind})에서 실패했습니다: ` +
+          `앞 단계가 ${currentFormat} 이미지를 넘겼는데 ${stage.in} 이미지를 기대합니다`,
+      );
+    }
+
+    let result: StageRun;
+    try {
+      result = runStage(current, stage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `체인의 ${index + 1}번째 스테이지(${stage.kind})에서 실패했습니다: ${message}`,
+      );
+    }
+
     if (result.readsNeighbors) {
       neighborStageCount += 1;
     }
 
-    // ⚠️ 이 실행기는 포맷 인접성을 검사하지 않는다. CheckAdjacent는 튜플로 받는 pipeline()에만
-    // 걸려 있고 여기 stages는 평범한 배열이라, grayscale 뒤에 RGBA8 스테이지를 두어도 컴파일이
-    // 막지 않는다. 그렇게 받은 까닭은 다음 화의 CLI가 명령줄 문자열에서 이 목록을 만들기 때문이다.
-    // 지금은 pipeline·mapPixels와 같은 구현 경계인 이 한 자리에서 RGBA8로 단언하고, 포맷을 언제
-    // 검사할지는 목록을 만드는 쪽의 숙제로 남겨 둔다.
     current = result.image as ImageBuffer<"RGBA8">;
+    currentFormat = stage.out;
+  }
+
+  // colorType 6은 픽셀마다 네 바이트를 읽는다. Gray8의 한 바이트 배열을 그대로 건네면
+  // 손상된 PNG가 생기므로, 인접성이 모두 맞아도 마지막 출력 포맷은 별도로 확인해야 한다.
+  if (currentFormat !== "RGBA8") {
+    throw new Error(
+      `체인의 마지막 출력이 ${currentFormat}입니다. PNG로 인코딩하려면 RGBA8로 끝나야 합니다`,
+    );
   }
 
   // 회전은 두 축을 맞바꾸므로 원본이 아니라 마지막 버퍼의 크기로 PNG를 만들어야 한다.
@@ -1021,6 +1046,26 @@ function runPipeline(pngBytes: Buffer, stages: readonly ExecutableStage[]): Buff
   png.data.set(current.data);
   encodeCount += 1;
   return PNG.sync.write(png, { colorType: 6 });
+}
+
+// codeStep 454 — 실행 시점 포맷 검사가 실패 위치와 마지막 출력 문제를 각각 설명하는지
+// 실제 PNG 바이트로 확인한다. 예외 자체를 흘리지 않고 메시지만 모아 관찰 출력 한 줄에 보탠다.
+function rejectedPipelineFormatDemo(pngBytes: Buffer): string {
+  const messages: string[] = [];
+  const chains: readonly (readonly ExecutableStage[])[] = [
+    [grayscaleStage(), invertStage()],
+    [grayscaleStage()],
+  ];
+
+  for (const stages of chains) {
+    try {
+      runPipeline(pngBytes, stages);
+    } catch (error) {
+      messages.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return messages.join(" / ");
 }
 
 // convolve 하나를 빠뜨리면 반환 경로 검사가 실제로 실패한다는 컴파일되는 증거다.
@@ -1380,11 +1425,15 @@ interface OptionSpec {
 const OPTION_SPEC = {
   "--save": { arity: 1 },
   "--chain": { arity: 1 },
+  "-o": { arity: 1 },
+  "--plan": { arity: 0 },
 } as const satisfies Record<string, OptionSpec>;
 
 interface CliOptions {
   readonly save?: string;
   readonly chain?: string;
+  readonly output?: string;
+  readonly plan?: boolean;
 }
 
 // codeStep 452 — 런타임 문자열이 실제 테이블 키인지 확인한 사실을 타입 검사기에도 전달한다.
@@ -1406,6 +1455,8 @@ function splitCliArgs(
   const stageArgs: string[] = [];
   let save: string | undefined;
   let chain: string | undefined;
+  let output: string | undefined;
+  let plan: boolean | undefined;
   let index = 0;
 
   while (index < argv.length) {
@@ -1423,11 +1474,21 @@ function splitCliArgs(
           throw new Error("--save는 한 번만 사용할 수 있습니다");
         }
         save = args[0];
-      } else {
+      } else if (token === "--chain") {
         if (chain !== undefined) {
           throw new Error("--chain은 한 번만 사용할 수 있습니다");
         }
         chain = args[0];
+      } else if (token === "-o") {
+        if (output !== undefined) {
+          throw new Error("-o는 한 번만 사용할 수 있습니다");
+        }
+        output = args[0];
+      } else {
+        if (plan !== undefined) {
+          throw new Error("--plan은 한 번만 사용할 수 있습니다");
+        }
+        plan = true;
       }
 
       index += 1 + spec.arity;
@@ -1451,6 +1512,8 @@ function splitCliArgs(
   const options: CliOptions = {
     ...(save === undefined ? {} : { save }),
     ...(chain === undefined ? {} : { chain }),
+    ...(output === undefined ? {} : { output }),
+    ...(plan === undefined ? {} : { plan }),
   };
   return { options, stageArgs };
 }
@@ -1628,10 +1691,10 @@ function loadChain(path: string): ExecutableStage[] {
 
 // codeStep 452 — 문법 오류가 어느 경로에서 나도 같은 한 줄 사용법을 보여 준다.
 const CLI_USAGE =
-  "사용법: imgfx apply <입력파일> [스테이지 플래그…] [--save <파일>] [--chain <파일>]";
+  "사용법: imgfx apply <입력파일> [스테이지 플래그…] [--save <파일>] [--chain <파일>] [-o <경로>] [--plan]";
 
-// codeStep 453 — 명령줄과 체인 파일 중 하나만 스테이지의 출처로 고른다.
-// 이 단계에서도 실제 이미지 실행은 연결하지 않고 계획과 JSON만 보여 준다.
+// codeStep 454 — 명령줄과 체인 파일 중 하나에서 만든 배열을 실행기에 연결한다. --plan은
+// 코덱을 전혀 부르지 않는 계획 전용 경로이고, -o가 없으면 기존처럼 계획과 JSON만 보는 드라이런이다.
 function runCli(argv: readonly string[]): void {
   const command = argv[0];
   if (command !== "apply") {
@@ -1654,6 +1717,20 @@ function runCli(argv: readonly string[]): void {
   const source = options.chain === undefined ? "명령줄" : `체인파일 ${options.chain}`;
 
   console.log(`CLI 입력 ${inputPath} / 출처 ${source} / 스테이지 ${stages.length}개`);
+
+  if (options.plan === true) {
+    // 계획만 보여 달라는 요청과 파일을 만들어 달라는 요청은 서로 어긋난다. 하나를 조용히
+    // 무시하면 사용자는 만들어졌다고 믿은 파일이 없는 것을 나중에야 알게 되므로 여기서 막는다.
+    if (options.output !== undefined || options.save !== undefined) {
+      throw new Error("--plan은 -o·--save와 함께 쓸 수 없습니다");
+    }
+
+    resetPipelineCounts();
+    console.log(`CLI 계획 ${planPipeline(stages).join(" / ")}`);
+    console.log(`CLI 계획 실행 뒤 디코딩 ${decodeCount} / 인코딩 ${encodeCount}`);
+    return;
+  }
+
   console.log(`CLI 계획 ${planPipeline(stages).join(" / ")}`);
   // JSON.stringify는 run 함수 프로퍼티를 생략하며, loadChain이 생성자로 그 손실을 메운다.
   console.log(`CLI JSON ${JSON.stringify(stages)}`);
@@ -1662,13 +1739,38 @@ function runCli(argv: readonly string[]): void {
     saveChain(stages, options.save);
     console.log(`CLI 저장 ${options.save} / 스테이지 ${stages.length}개`);
   }
+
+  if (options.output !== undefined) {
+    resetPipelineCounts();
+    const inputBytes = readFileSync(inputPath);
+    const inputPng = PNG.sync.read(inputBytes);
+    const outputBytes = runPipeline(inputBytes, stages);
+    writeFileSync(options.output, outputBytes);
+
+    // 반환값만 믿지 않고 방금 쓴 파일을 다시 열어, 디스크의 결과가 실제 PNG인지와 크기를 확인한다.
+    const writtenBytes = readFileSync(options.output);
+    const outputPng = PNG.sync.read(writtenBytes);
+    console.log(
+      `CLI 실행 ${options.output} / 디코딩 ${decodeCount} / 인코딩 ${encodeCount} / ` +
+        `크기 ${inputPng.width}x${inputPng.height} -> ${outputPng.width}x${outputPng.height} / ` +
+        `바이트 ${writtenBytes.length}`,
+    );
+  }
 }
 
 function main(): void {
-  // codeStep 452 — 인자가 있으면 CLI로 가고, 없으면 지금까지의 관찰 출력을 그대로 낸다.
+  // codeStep 454 — 셸 스크립트와 CI는 종료 코드 0과 1로 성공과 실패를 가른다. 성공 경로는
+  // Node의 기본값 0을 그대로 두고, 실패만 사람이 읽는 한 줄을 stderr로 보낸 뒤 1로 표시한다.
   const argv = process.argv.slice(2);
   if (argv.length > 0) {
-    runCli(argv);
+    try {
+      runCli(argv);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      // process.exit(1)은 아직 flush되지 않은 stdout·stderr를 자를 수 있다. exitCode만 세우면
+      // Node가 남은 출력을 정상적으로 비운 뒤 같은 종료 코드를 셸에 돌려준다.
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -1990,6 +2092,9 @@ function main(): void {
 
   writeFileSync(new URL("pipeline.png", OUT_DIR), pipelineBytes);
   console.log("저장 out/pipeline.png");
+
+  // codeStep 454 — 배열 실행기의 두 런타임 포맷 검사를 기존 관찰 본문의 마지막 한 줄에 모은다.
+  console.log(`실행기 포맷 거부 ${rejectedPipelineFormatDemo(readFileSync(INPUT_URL))}`);
 }
 
 main();
