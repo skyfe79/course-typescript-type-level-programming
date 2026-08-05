@@ -41,4 +41,22 @@ const step1Shape: Eq<Step1, { value: string }> = true;
 const step2Shape: Eq<Step2, { value: string } | null> = true;
 const step3Shape: Eq<Step3, ({ value: string } | null)[]> = true;
 
+// codeStep 349 — Pipe 타입 완성하기
+
+// 튜플을 머리와 꼬리로 나누고, 머리를 현재 Input에 적용한 결과를 새 Input으로 삼아 꼬리를 순회한다.
+// 더 나눌 머리가 없는 빈 튜플에 도달하면 지금까지 누적된 Input을 그대로 돌려준다.
+type Pipe<Input, Fns extends TypeFn[]> =
+  Fns extends [infer Head extends TypeFn, ...infer Tail extends TypeFn[]]
+    ? Pipe<Apply<Head, Input>, Tail>
+    : Input;
+
+type PipeResult = Pipe<string, [BoxT, NullableT, ArrayOfT]>;
+
+// 재귀 순회는 앞에서 손으로 한 단계씩 넘긴 계산과 정확히 같은 결과를 만든다.
+const pipeMatchesHand: Eq<PipeResult, Step3> = true;
+const pipeResultShape: Eq<PipeResult, ({ value: string } | null)[]> = true;
+
+// 빈 튜플은 적용할 타입 함수가 없다는 뜻이므로 처음 입력이 곧 결과다.
+const emptyPipeIsInput: Eq<Pipe<boolean, []>, boolean> = true;
+
 export {};
