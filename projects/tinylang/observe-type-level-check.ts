@@ -11,3 +11,66 @@ type Tokenize<S extends string> =
     : [S];
 
 type T1 = Tokenize<"1 + true">; // ["1", "+", "true"]
+
+// codeStep 493 — 타입 레벨 검사 규칙
+
+// 이 작은 검사기가 표현할 수 있는 값 타입 세 가지에, 아직 해석하지 못하는 식별자 같은
+// 토큰을 표시할 unknown을 더한다. unknown은 TypeScript의 unknown 타입이 아니라 문자열
+// 리터럴 "unknown"이며, 아래 오류 문장에 현재 피연산자 타입 이름으로 그대로 들어간다.
+type TokenTypeName = "number" | "string" | "boolean" | "unknown";
+
+// 숫자로 해석할 수 있는 문자열을 먼저 고르고, 그다음 불리언 리터럴과 큰따옴표로 감싼
+// 문자열 리터럴을 판정한다. 어느 모양에도 맞지 않으면 이 데모가 아직 모르는 토큰이다.
+type TypeOfToken<Token extends string> =
+  Token extends `${number}` ? "number"
+    : Token extends "true" | "false" ? "boolean"
+      : Token extends `"${string}"` ? "string"
+        : "unknown";
+
+// 값 검사기의 진단 문장을 템플릿 리터럴 타입으로 그대로 옮긴다. 왼쪽과 오른쪽 타입은
+// 각 재귀 단계에서 계산된 이름이므로, 규칙을 어긴 바로 그 피연산자 쌍이 문장에 남는다.
+type PlusOperandError<
+  Left extends TokenTypeName,
+  Right extends TokenTypeName,
+> = `'+'의 피연산자는 모두 number이거나 모두 string이어야 합니다 (현재 ${Left}, ${Right})`;
+
+// §23 ReduceT와 같은 접기 구조다. Accumulator는 지금까지 계산한 왼쪽 피연산자의
+// 타입 이름이고, ["+", 오른쪽, ...나머지]를 한 단계씩 소비하면서 새 누산기를 만든다.
+// 따라서 1 + 2 + 3도 값 검사기의 왼쪽 결합과 같이 (1 + 2) + 3 순서로 검사된다.
+type CheckTokenTail<
+  Accumulator extends TokenTypeName,
+  Tokens extends readonly string[],
+> = Tokens extends readonly []
+  ? "ok"
+  : Tokens extends readonly ["+", infer RightToken extends string, ...infer Rest extends readonly string[]]
+    ? TypeOfToken<RightToken> extends infer Right extends TokenTypeName
+      ? Accumulator extends "number"
+        ? Right extends "number"
+          ? CheckTokenTail<"number", Rest>
+          : PlusOperandError<Accumulator, Right>
+        : Accumulator extends "string"
+          ? Right extends "string"
+            ? CheckTokenTail<"string", Rest>
+            : PlusOperandError<Accumulator, Right>
+          : PlusOperandError<Accumulator, Right>
+      : never
+    : never;
+
+// 첫 토큰의 타입 이름이 폴드의 초깃값이다. 이후 규칙이 실패하면 오류 문자열을 즉시
+// 반환하므로 남은 토큰은 더 보지 않는다. 빈 튜플은 검사할 규칙이 없으므로 성공이다.
+type CheckTokens<Tokens extends readonly string[]> =
+  Tokens extends readonly [infer First extends string, ...infer Rest extends readonly string[]]
+    ? CheckTokenTail<TypeOfToken<First>, Rest>
+    : "ok";
+
+// Eq는 호버에서만 보이던 결과를 두 타입의 정확한 동일성으로 바꾸어 컴파일러가 검사하게 한다.
+type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+type CheckedNumbers = CheckTokens<["1", "+", "2"]>;
+type CheckedMixed = CheckTokens<["1", "+", "true"]>;
+
+const checkedNumbersIsOk: Eq<CheckedNumbers, "ok"> = true;
+const checkedMixedHasSameDiagnostic: Eq<
+  CheckedMixed,
+  "'+'의 피연산자는 모두 number이거나 모두 string이어야 합니다 (현재 number, boolean)"
+> = true;
