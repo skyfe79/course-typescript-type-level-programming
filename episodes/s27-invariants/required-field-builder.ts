@@ -39,8 +39,15 @@ class UserBuilder<Provided extends keyof RequiredFields = never> {
     return this as unknown as UserBuilder<K extends keyof RequiredFields ? Provided | K : Provided>;
   }
 
-  // 현재 단계에는 완전성 제약이 없어 비어 있는 객체도 AllFields라고 단언할 수 있다.
-  build(): AllFields {
+  // codeStep 399 — 누락된 필드로 build() 호출해 컴파일 에러 확인하기
+
+  // RequiredFields에서 Provided를 뺀 키가 없을 때만 이 빌더를 호출 대상으로 허용한다.
+  build(
+    this: Exclude<keyof RequiredFields, Provided> extends never
+      ? UserBuilder<Provided>
+      : never,
+  ): AllFields {
+    // 공개 API가 모든 필수 키를 확인했으므로 완성된 결과 타입으로 좁혀 반환한다.
     return this.fields as AllFields;
   }
 }
@@ -48,7 +55,10 @@ class UserBuilder<Provided extends keyof RequiredFields = never> {
 // 이 호출은 397에서는 통과한다. 399에서 같은 호출이 거부되는지 비교하기 위해 실행하지 않는다.
 function tryBuildWithoutAnyFields(): void {
   // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
+  // @ts-expect-error - id와 email이 모두 제공되지 않아 남은 필수 키가 존재한다
   new UserBuilder().build();
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/required-field-builder.ts(58,3): error TS2684: The 'this' context of type 'UserBuilder<never>' is not assignable to method's 'this' of type 'never'.
 }
 
 const withId = new UserBuilder().set("id", "user-1");
@@ -59,5 +69,24 @@ const optionalKeyDoesNotAccumulate: Eq<
   typeof withIdAndNickname,
   UserBuilder<"id">
 > = true;
+
+// id만 제공한 호출도 email이 남아 있으므로 컴파일 단계에서 거부된다.
+function tryBuildWithOnlyId(): void {
+  // 이 함수 역시 실행하지 않아, 오류 예제가 런타임 결과를 만들지 않게 한다.
+  // @ts-expect-error - email이 아직 제공되지 않아 남은 필수 키가 존재한다
+  withId.build();
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/required-field-builder.ts(76,3): error TS2684: The 'this' context of type 'UserBuilder<"id">' is not assignable to method's 'this' of type 'never'.
+}
+
+// 필수 키를 모두 제공하면 선택 키의 개수와 관계없이 build()를 호출할 수 있다.
+const complete = new UserBuilder()
+  .set("id", "user-1")
+  .set("email", "learner@example.com")
+  .set("nickname", "타입 탐험가")
+  .build();
+const buildReturnsCompleteUser: Eq<typeof complete, AllFields> = true;
+
+console.log("완성된 사용자:", complete);
 
 export {};
