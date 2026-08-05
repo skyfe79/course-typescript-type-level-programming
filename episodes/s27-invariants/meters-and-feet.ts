@@ -54,4 +54,23 @@ const preservedMeters = add(meters(3), meters(4));
 // 맨 +의 결과가 number로 떨어지는 것과 달리 add의 결과에는 Measurement<Meters>가 그대로 남는다.
 const addPreservesMeters: Eq<typeof preservedMeters, Measurement<Meters>> = true;
 
+// codeStep 388 — 단위가 다른 덧셈이 막히는지 확인
+
+// 같은 단위끼리의 덧셈은 통과하고 150을 출력한다.
+console.log(add(meters(100), meters(50)));
+
+function tryToAddDifferentUnits(): void {
+  // 서로 다른 단위를 실수로 섞은 호출은 컴파일러가 거부한다.
+  // @ts-expect-error - Measurement<Feet>는 Measurement<Meters> 인자 자리에 전달할 수 없다
+  add(meters(100), feet(100));
+  // 실측 진단(오류 지시어 한 줄만 제거했을 때):
+  // episodes/s27-invariants/meters-and-feet.ts(64,20): error TS2345: Argument of type 'Measurement<Feet>' is not assignable to parameter of type 'Measurement<Meters>'.
+  //   Type 'Measurement<Feet>' is not assignable to type '{ readonly __unit?: Meters | undefined; }'.
+  //     Types of property '__unit' are incompatible.
+  //       Type 'Feet | undefined' is not assignable to type 'Meters | undefined'.
+  //         Type 'Feet' is not assignable to type 'Meters'.
+  //           Types of property '__tag' are incompatible.
+  //             Type '"feet"' is not assignable to type '"meters"'.
+}
+
 export {};
