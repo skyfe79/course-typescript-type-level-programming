@@ -554,6 +554,66 @@ interface ScratchBuffer {
 // 박스 커널은 가로 한 번, 세로 한 번으로 나눌 수 있다. 축 유니온은 두 순회의 방향을 제한한다.
 type ConvolveAxis = "row" | "column";
 
+// codeStep 442 — 이미지 밖 이웃을 안으로 되돌리는 방법은 참·거짓이 아니라 세 정책 중 하나다.
+type EdgePolicy = "clamp" | "wrap" | "mirror";
+
+function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
+  switch (policy) {
+    case "clamp":
+      return Math.max(0, Math.min(limit - 1, v));
+    case "wrap":
+      // 나머지를 한 번 더 보정하면 음수나 폭보다 훨씬 큰 좌표도 항상 0 이상으로 돌아온다.
+      return ((v % limit) + limit) % limit;
+    case "mirror": {
+      // 길이가 1이면 대칭시킬 안쪽 픽셀이 없으므로 유일한 좌표 0만 돌려준다.
+      if (limit === 1) {
+        return 0;
+      }
+
+      // 가장자리 픽셀을 겹쳐 쓰지 않는 mirror의 한 주기는 0…끝…0까지인 2×(limit-1)이다.
+      // 주기 안으로 먼저 접은 뒤 후반부를 다시 뒤집으므로 아무리 먼 좌표도 반복 대칭된다.
+      const period = 2 * (limit - 1);
+      const folded = ((v % period) + period) % period;
+      return folded < limit ? folded : period - folded;
+    }
+    default: {
+      // 유니온에 네 번째 정책을 더하면 여기서 컴파일이 먼저 깨진다. 값만 늘리고 처리를
+      // 빠뜨리는 일을 타입 검사기가 막아 주므로, 정책이 늘어도 이 함수는 조용히 틀리지 않는다.
+      const exhaustive: never = policy;
+      throw new Error(`처리하지 않은 가장자리 정책: ${String(exhaustive)}`);
+    }
+  }
+}
+
+function clampCoord(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  policy: EdgePolicy,
+): readonly [number, number] {
+  return [resolveAxisCoord(x, width, policy), resolveAxisCoord(y, height, policy)];
+}
+
+function readPixel(
+  buf: ImageBuffer<"RGBA8">,
+  x: number,
+  y: number,
+): Pixel<"RGBA8"> {
+  const index = (y * buf.width + x) * 4;
+  return [buf.data[index], buf.data[index + 1], buf.data[index + 2], buf.data[index + 3]];
+}
+
+function sampleEdge(
+  buf: ImageBuffer<"RGBA8">,
+  x: number,
+  y: number,
+  policy: EdgePolicy,
+): Pixel<"RGBA8"> {
+  const [sampleX, sampleY] = clampCoord(x, y, buf.width, buf.height, policy);
+  return readPixel(buf, sampleX, sampleY);
+}
+
 // 직접 순회와 분리 순회가 실제로 가중치 곱셈을 몇 번 수행했는지 같은 카운터로 비교한다.
 let multiplyCount = 0;
 
@@ -565,6 +625,7 @@ function convolve1D(
   source: ImageBuffer<"RGBA8"> | ScratchBuffer,
   size: number,
   axis: ConvolveAxis,
+  edge: EdgePolicy = "clamp",
 ): ScratchBuffer {
   const out = new Float64Array(source.data.length);
   const radius = Math.floor(size / 2);
@@ -581,10 +642,9 @@ function convolve1D(
           const offset = tap - radius;
           const rawX = axis === "row" ? x + offset : x;
           const rawY = axis === "column" ? y + offset : y;
-          // 이미지 밖으로 나간 좌표는 우선 가장 가까운 가장자리로 고정한다.
-          // 이 방법을 고를 수 있게 만드는 것은 다음 codeStep의 일이다.
-          const sampleX = Math.max(0, Math.min(source.width - 1, rawX));
-          const sampleY = Math.max(0, Math.min(source.height - 1, rawY));
+          // 정책 유니온이 한 축의 좌표를 결정하므로 같은 순회가 clamp·wrap·mirror를 모두 쓴다.
+          const sampleX = resolveAxisCoord(rawX, source.width, edge);
+          const sampleY = resolveAxisCoord(rawY, source.height, edge);
           const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
 
           sum += source.data[sampleIndex] * weights[tap];
@@ -635,6 +695,7 @@ const boxKernel5x5: Kernel<
 function convolve(
   source: ImageBuffer<"RGBA8">,
   kernel: KernelShape<readonly number[]>,
+  edge: EdgePolicy = "clamp",
 ): ImageBuffer<"RGBA8"> {
   const out = new Uint8ClampedArray(source.data.length);
   const radius = Math.floor(kernel.side / 2);
@@ -646,9 +707,8 @@ function convolve(
 
         for (let kernelY = 0; kernelY < kernel.side; kernelY += 1) {
           for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
-            // 여기서도 가장자리는 아직 가장 가까운 픽셀로 고정해 둔다.
-            const sampleX = Math.max(0, Math.min(source.width - 1, x + kernelX - radius));
-            const sampleY = Math.max(0, Math.min(source.height - 1, y + kernelY - radius));
+            const sampleX = resolveAxisCoord(x + kernelX - radius, source.width, edge);
+            const sampleY = resolveAxisCoord(y + kernelY - radius, source.height, edge);
             const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
             const weightIndex = kernelY * kernel.side + kernelX;
 
@@ -669,9 +729,10 @@ function convolve(
 function boxBlurSeparable(
   buf: ImageBuffer<"RGBA8">,
   size: number,
+  edge: EdgePolicy = "clamp",
 ): ImageBuffer<"RGBA8"> {
-  const rows = convolve1D(buf, size, "row");
-  const columns = convolve1D(rows, size, "column");
+  const rows = convolve1D(buf, size, "row", edge);
+  const columns = convolve1D(rows, size, "column", edge);
   return scratchToImage(columns);
 }
 
@@ -819,6 +880,19 @@ function main(): void {
     `박스 블러 5x5 곱셈 직접 ${directMultiplyCount} (픽셀·채널당 25) / ` +
       `분리 ${separableMultiplyCount} (10) / ` +
       `최대 채널 차이 ${maxChannelDifference(directBoxBlur, separableBoxBlur)}`,
+  );
+
+  // codeStep 442 — x=-1은 clamp면 첫 픽셀, wrap이면 마지막, mirror면 두 번째 픽셀이 된다.
+  console.log(
+    `가장자리 샘플 clamp ${Array.from(sampleEdge(decodedImage, -1, 0, "clamp"))} / ` +
+      `wrap ${Array.from(sampleEdge(decodedImage, -1, 0, "wrap"))} / ` +
+      `mirror ${Array.from(sampleEdge(decodedImage, -1, 0, "mirror"))}`,
+  );
+  const clampBoxBlur = boxBlurSeparable(decodedImage, 5, "clamp");
+  const wrapBoxBlur = boxBlurSeparable(decodedImage, 5, "wrap");
+  console.log(
+    `가장자리 정책 차이 clamp vs wrap 최대 채널 차이 ` +
+      `${maxChannelDifference(clampBoxBlur, wrapBoxBlur)}`,
   );
 
 }
