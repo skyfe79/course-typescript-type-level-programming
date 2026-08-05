@@ -1,0 +1,5 @@
+{
+  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정한다.
+  // 아직 배포하지 않는 프로젝트이므로 이 설정을 상속하는 것만으로 충분하다.
+  "extends": "../../tsconfig.json"
+}

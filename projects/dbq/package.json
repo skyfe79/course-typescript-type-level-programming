@@ -1,0 +1,7 @@
+{
+  "name": "dbq",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "타입 안전 쿼리 빌더 CLI (§26 프로젝트)입니다."
+}
