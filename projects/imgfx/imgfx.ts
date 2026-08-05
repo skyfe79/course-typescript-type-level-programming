@@ -684,6 +684,20 @@ type Direction = "horizontal" | "vertical";
 // 별도 유니온으로 두어 remapCoord의 "같은 크기 안에서 재배치한다"는 계약을 그대로 지킨다.
 type Rotation = "90" | "180" | "270";
 
+// codeStep 449 — 회전도 실행기가 받을 수 있도록 포맷 관점의 스테이지로 편입한다.
+interface RotateStage extends PixelStage<"rotate", "RGBA8", "RGBA8"> {
+  readonly rotation: Rotation;
+}
+
+// AnyStage와 AnyStageWithFlip은 이전 화의 소진 검사 스냅샷이므로 그대로 두고,
+// 회전까지 실행할 새 유니온을 별도로 만든다.
+type ExecutableStage = AnyStageWithFlip | RotateStage;
+
+// Stage<Kind, In, Out>은 픽셀 포맷만 표현하고 크기 W·H는 표현하지 못한다. 따라서 유니온에
+// 들어온 회전 결과는 ImageBuffer<"RGBA8">, 즉 W = H = number로 뭉개져 크기 교환 정보가 사라진다.
+// 크기를 타입에 남기려면 rotate90·rotate180·rotate270을 직접 부르고, 실행기 체인에 넣을 때는
+// 그 정보를 포기한다. 정밀한 크기 API와 공통 실행기 API가 함께 존재하는 이유가 이 차이다.
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -853,6 +867,84 @@ function rotate180<W extends number, H extends number>(
   buf: ImageBuffer<"RGBA8", W, H>,
 ): ImageBuffer<"RGBA8", W, H> {
   return makeImageBuffer(rotatePixels(buf, "180"), buf.width, buf.height);
+}
+
+// codeStep 449 — 실행기용 회전은 각도를 데이터로 들고 다니며, 실행할 때도 기존 회전 코어를 쓴다.
+function rotateStage(rotation: Rotation): RotateStage {
+  return {
+    kind: "rotate",
+    rotation,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (source) => {
+      const swapsDimensions = rotation !== "180";
+      return makeImageBuffer(
+        rotatePixels(source, rotation),
+        swapsDimensions ? source.height : source.width,
+        swapsDimensions ? source.width : source.height,
+      );
+    },
+  };
+}
+
+interface StageRun {
+  readonly image: ImageBuffer<PixelFormat>;
+  /** 이웃 픽셀을 읽어 제자리에서 계산할 수 없는 스테이지인가. */
+  readonly readsNeighbors: boolean;
+}
+
+// 스테이지가 run을 들고 있어 어떤 함수를 부를지는 데이터가 이미 정해 두었다. 그래도 kind로
+// 가르는 까닭은 실행 전에 알아야 하는 것이 run 바깥에 있기 때문이다 — 이 스테이지가 이웃을
+// 읽어서 제자리 계산이 불가능한가. 픽셀 단위·이웃 읽기·좌표 재배치라는 세 묶음은 실행 준비가
+// 달라지는 이유를 그대로 드러낸다.
+function runStage(source: ImageBuffer<"RGBA8">, stage: ExecutableStage): StageRun {
+  switch (stage.kind) {
+    // 픽셀 하나만 읽어 픽셀 하나를 쓰는 커널 계열은 자기 자리만 보므로 이웃을 읽지 않는다.
+    case "invert":
+    case "grayscale":
+    case "brightness":
+    case "contrast":
+    case "threshold":
+    case "saturate":
+      return { image: stage.run(source), readsNeighbors: false };
+    // 컨볼루션만 이웃을 읽는다. 그래서 제자리에서 고치면 아직 읽지 않은 이웃이 오염된다
+    // (codeStep 443의 inPlaceCorruptionDemo가 그 오염을 5×1 버퍼로 보여 주었다). 그중 분리
+    // 순회로 도는 박스 블러는 중간값을 반올림하지 않으려고 Float64Array 스크래치까지 두 개 잡고,
+    // 가우시안·샤픈은 일반 순회라 출력 배열 하나만 만든다 — 이 분류는 거기까지 가르지 않는다.
+    case "convolve":
+      return { image: stage.run(source), readsNeighbors: true };
+    // 값은 그대로 두고 자리만 옮기는 좌표 재배치 계열이다.
+    case "flip":
+    case "rotate":
+      return { image: stage.run(source), readsNeighbors: false };
+  }
+  // default를 두지 않은 것이 곧 소진 검사다. StageRun에는 undefined가 없으므로 유니온에 종류를
+  // 더하고 case를 빠뜨리면 반환하지 않는 경로가 생겨 TS2366으로 컴파일이 먼저 깨진다.
+  // default의 never로 검사하는 describeStage와 결과는 같지만, 여기서는 억제 주석 없이 스위치
+  // 자체가 닫혀 있어야 한다. case 하나를 지우고 npx tsc --noEmit을 실행하면 차이를 볼 수 있다.
+  // 반환 이미지를 PixelFormat으로 넓히는 이유는 grayscale만 Gray8을 내놓기 때문이다. 그래서 이
+  // 함수는 다음 스테이지가 그 포맷을 받을 수 있는지까지는 말해 주지 않는다 — 앞뒤를 맞물리게 하는
+  // 일은 목록을 만드는 쪽의 몫으로 남는다.
+}
+
+// convolve 하나를 빠뜨리면 반환 경로 검사가 실제로 실패한다는 컴파일되는 증거다.
+function runStageMissingConvolve(
+  source: ImageBuffer<"RGBA8">,
+  stage: ExecutableStage,
+  // @ts-expect-error — convolve를 처리하지 않아 값을 반환하지 않는 경로가 남는다 (TS2366)
+): StageRun {
+  switch (stage.kind) {
+    case "invert":
+    case "grayscale":
+    case "brightness":
+    case "contrast":
+    case "threshold":
+    case "saturate":
+      return { image: stage.run(source), readsNeighbors: false };
+    case "flip":
+    case "rotate":
+      return { image: stage.run(source), readsNeighbors: false };
+  }
 }
 
 function sampleEdge(
@@ -1350,6 +1442,26 @@ function main(): void {
 
   saveImage("rotate-90", rotate90(decodedImage));
   saveImage("rotate-180", rotate180(decodedImage));
+
+  // codeStep 449 — 실행기에서는 크기 타입이 number로 넓어지지만, 실제 픽셀과 크기는 직접 호출과 같다.
+  const executorRotation = runStage(decodedImage, rotateStage("90"));
+  const executorRotated = executorRotation.image as ImageBuffer<"RGBA8">;
+  console.log(
+    `실행기 회전 직접 호출과 최대 채널 차이 ` +
+      `${maxChannelDifference(rotatedDecoded, executorRotated)} / ` +
+      `크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${executorRotated.width}x${executorRotated.height}`,
+  );
+
+  // 분류 문자열을 손으로 적지 않고 각 스테이지를 실제로 실행한 결과의 메타데이터를 읽는다.
+  const invertRun = runStage(asymmetricImage, invertStage());
+  const convolveRun = runStage(asymmetricImage, gaussianBlurStage());
+  const flipRun = runStage(asymmetricImage, flipHorizontalStage());
+  console.log(
+    `실행기 이웃 읽기 invert=${invertRun.readsNeighbors} ` +
+      `convolve=${convolveRun.readsNeighbors} flip=${flipRun.readsNeighbors} ` +
+      `rotate=${executorRotation.readsNeighbors}`,
+  );
 }
 
 main();
