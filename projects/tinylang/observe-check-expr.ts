@@ -53,7 +53,7 @@ function observe(source: string, scope: Scope, ctx: CheckContext): CheckResult |
 
 const scope = createScope(null);
 const emptyFunctions: FunctionTable = new Map<string, FunctionSignature>();
-const emptyContext: CheckContext = { functions: emptyFunctions };
+const emptyContext: CheckContext = { functions: emptyFunctions, returnType: null };
 
 console.log("=== 리터럴 산술 검사 ===");
 observe("1 + 2", scope, emptyContext);
@@ -86,7 +86,7 @@ const functions: FunctionTable = new Map<string, FunctionSignature>([
     },
   ],
 ]);
-const functionContext: CheckContext = { functions };
+const functionContext: CheckContext = { functions, returnType: null };
 observe("add(1, 2)", scope, functionContext);
 observe("add(1)", scope, functionContext);
 observe('add(1, "hi")', scope, functionContext);
