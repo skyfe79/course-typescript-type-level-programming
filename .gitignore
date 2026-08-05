@@ -52,6 +52,8 @@ projects/ledger/journal.json
 projects/ledger/run-log.json
 # 강의 실습 산출물 (imgfx — PNG 코덱 왕복으로 만드는 복사본)
 projects/imgfx/copy.png
+# codeStep 455의 CLI가 -o로 만드는 실행 결과물이며 소스가 아닙니다.
+projects/imgfx/out.png
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
@@ -110,6 +112,12 @@ dist
 # main/types/bin 대상이 비어 있으므로 예외를 둡니다.
 !projects/ledger/dist/
 !projects/ledger/dist/**
+# 강의 실습용 배포 결과물 (§30 imgfx — ep_203)
+# 이 저장소는 강의 실습용이라 ep_203 태그를 체크아웃한 상태에서 곧바로 consumer-check.ts가
+# 해석되고 저장소 전체 타입 게이트가 통과해야 합니다. dist가 없으면 imgfx 패키지의
+# main/types/bin 대상이 비어 있으므로 예외를 둡니다.
+!projects/imgfx/dist/
+!projects/imgfx/dist/**
 .output
 
 # Gatsby files
