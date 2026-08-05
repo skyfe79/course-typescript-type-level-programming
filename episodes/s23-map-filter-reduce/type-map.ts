@@ -86,4 +86,21 @@ const nullableExact: [1 | null, "two" | null, true | null] = nullableProof;
 // BoxedRow는 위에서 그대로 유효하게 남아 있다. 하나의 재귀가 두 F를 모두 받아 냈다.
 console.log("NullableRow:", nullableExact);
 
+// 이번 화의 첫 번째 변환은 리터럴 타입을 각각 대응하는 넓은 원시 타입으로 바꾼다.
+// 조건부 타입은 string, number, boolean 리터럴만 넓히고 나머지 타입은 그대로 둔다.
+type Widen<T> = T extends string ? string
+  : T extends number ? number
+  : T extends boolean ? boolean
+  : T;
+
+interface WidenF extends TypeFn {
+  readonly out: Widen<this["arg"]>;
+}
+
+type WidenedRow = MapT<typeof row, WidenF>;
+
+// 원래 리터럴과 다른 값도 대입할 수 있으므로 1, "two", true가 넓어졌음을 알 수 있다.
+const widenedProof: WidenedRow = [42, "another string", false];
+const widenedExact: [number, string, boolean] = widenedProof;
+
 export {};
