@@ -159,6 +159,14 @@ function contrastStage(amount: number): ContrastStage {
 
 // codeStep 437 — 임계값 스테이지도 커널을 공유 순회에 건네기만 한다.
 function thresholdStage(level: number): ThresholdStage {
+  // codeStep 439 — 잘못된 level은 스테이지 객체를 만들기 전에 거부한다.
+  // 그러면 유효하지 않은 스테이지가 파이프라인 계획에 들어갈 틈이 없다.
+  // NaN은 어떤 크기 비교에도 false를 돌려주므로 범위 검사만으로는 빠져나간다.
+  // 숫자인지부터 확인해야 "이 뒤로는 유효한 값뿐"이라는 약속이 실제로 성립한다.
+  if (!Number.isFinite(level) || level < 0 || level > 255) {
+    throw new Error(`threshold level은 0에서 255 사이의 숫자여야 합니다: ${level}`);
+  }
+
   return {
     kind: "threshold",
     level,
@@ -170,6 +178,12 @@ function thresholdStage(level: number): ThresholdStage {
 
 // codeStep 438 — 채도 스테이지는 factor를 품고 같은 mapPixels를 재사용한다.
 function saturateStage(factor: number): SaturateStage {
+  // codeStep 439 — factor도 객체 생성 시점에 한 번 검사해 잘못된 계획을 일찍 막는다.
+  // 여기서도 NaN을 먼저 걸러야 아래 커널이 값을 믿고 계산만 할 수 있다.
+  if (!Number.isFinite(factor) || factor < 0) {
+    throw new Error(`saturate factor는 0 이상의 숫자여야 합니다: ${factor}`);
+  }
+
   return {
     kind: "saturate",
     factor,
@@ -177,6 +191,33 @@ function saturateStage(factor: number): SaturateStage {
     out: "RGBA8",
     run: (buf) => mapPixels(buf, "RGBA8", saturateKernel(factor)),
   };
+}
+
+// codeStep 439 — 두 생성자가 실행보다 먼저 실패한다는 사실을 한 줄의 실행 결과로 관찰한다.
+function rejectedStageDemo(): string {
+  const messages: string[] = [];
+
+  try {
+    thresholdStage(300);
+  } catch (error) {
+    messages.push(error instanceof Error ? error.message : String(error));
+  }
+
+  try {
+    saturateStage(-1);
+  } catch (error) {
+    messages.push(error instanceof Error ? error.message : String(error));
+  }
+
+  try {
+    // 명령줄 인자를 Number로 바꾸다 실패하면 예외가 아니라 NaN이 돌아온다.
+    // 크기 비교만으로 걸렀다면 이 값이 그대로 커널까지 흘러 들어갔을 자리다.
+    thresholdStage(Number("128px"));
+  } catch (error) {
+    messages.push(error instanceof Error ? error.message : String(error));
+  }
+
+  return messages.join(" / ");
 }
 
 // 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
@@ -369,6 +410,8 @@ function mapPixels<In extends PixelFormat, Out extends PixelFormat>(
   outFormat: Out,
   kernel: PixelKernel<In, Out>,
 ): ImageBuffer<Out> {
+  // codeStep 439 — 효과 매개변수는 스테이지 생성자가 이미 한 번 검사했다.
+  // 모든 픽셀이 지나는 공유 순회에서는 같은 범위 검사를 반복하지 않는다.
   const pixelCount = source.width * source.height;
 
   // In은 런타임에 지워지는 팬텀 타입이라 bytesPerPixel에 넘길 포맷 값이 없다.
@@ -435,6 +478,7 @@ const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
   ];
 
 // codeStep 437 — 밝기가 level 이상이면 흰색, 미만이면 검은색으로 가르되 알파는 보존한다.
+// codeStep 439 — level은 thresholdStage가 이미 검사하므로 커널은 픽셀마다 다시 검사하지 않는다.
 const thresholdKernel = (level: number): PixelKernel<"RGBA8", "RGBA8"> =>
   ([r, g, b, a]) => {
     const channel = luma(r, g, b) >= level ? 255 : 0;
@@ -443,6 +487,7 @@ const thresholdKernel = (level: number): PixelKernel<"RGBA8", "RGBA8"> =>
 
 // codeStep 438 — 원래 채널과 회색 사이의 거리를 factor만큼 벌려 채도를 조절한다.
 // factor 0은 그레이스케일, 1은 원본, 1보다 크면 색 차이가 더 벌어져 색이 진해진다.
+// codeStep 439 — factor 역시 saturateStage가 한 번 검사했으므로 커널에서는 계산만 한다.
 const saturateKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
   ([r, g, b, a]) => {
     const gray = luma(r, g, b);
@@ -551,6 +596,12 @@ function main(): void {
   console.log(`채도 1 픽셀 ${Array.from(saturateStage(1).run(samplePixel).data)}`);
   console.log(`채도 1.8 픽셀 ${Array.from(saturateStage(1.8).run(samplePixel).data)}`);
 
+  // codeStep 439 — 실패 둘은 try/catch로 모으고, 정상 level은 바로 실행되는 대조를 같은 줄에 둔다.
+  console.log(
+    `잘못된 매개변수 ${rejectedStageDemo()} / ` +
+      `정상 임계값 128 픽셀 ${Array.from(thresholdStage(128).run(samplePixel).data)}`,
+  );
+
   // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
   // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
   // 나머지 두 채널은 그대로 더해지므로, 잘린 자리가 어디인지 출력에서 바로 가려진다.
@@ -573,6 +624,10 @@ function main(): void {
   saveImage("invert", invertStage().run(decodedImage));
   saveImage("brightness", brightnessStage(50).run(decodedImage));
   saveImage("contrast", contrastStage(1.5).run(decodedImage));
+
+  saveImage("threshold", thresholdStage(128).run(decodedImage));
+  saveImage("saturate-0", saturateStage(0).run(decodedImage));
+  saveImage("saturate-1.8", saturateStage(1.8).run(decodedImage));
 }
 
 main();
