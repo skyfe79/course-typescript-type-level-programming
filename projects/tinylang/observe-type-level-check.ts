@@ -1,4 +1,6 @@
-// tinylang의 검사 규칙을 값이 아니라 타입으로 다시 짜서, 같은 판정을 타입 검사만으로 내린다.
+// 값으로 구현한 tinylang 검사 규칙을 타입으로 옮겨, 같은 판정을 컴파일 때와 실행 때 대조한다.
+
+import { compile, formatDiagnostic } from "./src/compile.ts";
 
 // codeStep 492 — 타입 레벨 토크나이저
 
@@ -74,3 +76,33 @@ const checkedMixedHasSameDiagnostic: Eq<
   CheckedMixed,
   "'+'의 피연산자는 모두 number이거나 모두 string이어야 합니다 (현재 number, boolean)"
 > = true;
+
+// codeStep 494 — Check 진입점과 값 버전과의 대조
+
+// 문자열을 토큰화한 결과를 곧바로 검사기에 넘기면 사용자가 볼 단일 진입점이 된다.
+type Check<S extends string> = CheckTokens<Tokenize<S>>;
+
+type Bad = Check<"1 + true">; // 오류 문자열 타입
+type Good = Check<"1 + 2">; // "ok"
+
+const badHasSameDiagnostic: Eq<
+  Bad,
+  "'+'의 피연산자는 모두 number이거나 모두 string이어야 합니다 (현재 number, boolean)"
+> = true;
+const goodIsOk: Eq<Good, "ok"> = true;
+
+// 같은 두 식을 실제 프로그램으로 감싸 값 검사기에 넣는다. 실패 쪽은 타입 레벨의 Bad와
+// 같은 문장을 출력하고, 성공 쪽은 진단 없이 컴파일 경계를 통과한다.
+function observeValueChecker(source: string): void {
+  const result = compile(source);
+  console.log(`\n${source}`);
+  if (result.ok) {
+    console.log("진단 없음");
+    return;
+  }
+  for (const diagnostic of result.diagnostics) console.log(formatDiagnostic(diagnostic));
+}
+
+console.log("=== 값 검사기와 타입 레벨 검사 결과 대조 ===");
+observeValueChecker("print(1 + true);");
+observeValueChecker("print(1 + 2);");
