@@ -628,6 +628,9 @@ type ConvolveAxis = "row" | "column";
 // codeStep 442 — 이미지 밖 이웃을 안으로 되돌리는 방법은 참·거짓이 아니라 세 정책 중 하나다.
 type EdgePolicy = "clamp" | "wrap" | "mirror";
 
+// codeStep 444 — 플립 방향을 유니온으로 닫아 좌표 재배치가 모든 방향을 처리하게 한다.
+type Direction = "horizontal" | "vertical";
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -666,12 +669,40 @@ function clampCoord(
   return [resolveAxisCoord(x, width, policy), resolveAxisCoord(y, height, policy)];
 }
 
+function remapCoord(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  direction: Direction,
+): readonly [number, number] {
+  switch (direction) {
+    case "horizontal":
+      return [width - 1 - x, y];
+    case "vertical":
+      return [x, height - 1 - y];
+    default: {
+      // 방향을 추가하고 좌표 계산을 빠뜨리면 이 소진 검사에서 컴파일이 먼저 깨진다.
+      const exhaustive: never = direction;
+      throw new Error(`처리하지 않은 플립 방향: ${String(exhaustive)}`);
+    }
+  }
+}
+
+// codeStep 444 — 2차원 좌표를 평탄한 배열의 바이트 오프셋으로 바꾸는 유일한 자리다.
+// 지금까지 이 식은 readPixel과 두 컨볼루션 순회에 따로따로 적혀 있었다. 픽셀을 옮기는 일이
+// 곧 이 오프셋을 다시 계산하는 일이므로, 자리를 옮기기 전에 계산식부터 한곳으로 모은다.
+// RGBA8 경로에서만 쓰이므로 픽셀당 바이트 수는 4로 고정이다.
+function pixelIndex(width: number, x: number, y: number): number {
+  return (y * width + x) * 4;
+}
+
 function readPixel(
   buf: ImageBuffer<"RGBA8">,
   x: number,
   y: number,
 ): Pixel<"RGBA8"> {
-  const index = (y * buf.width + x) * 4;
+  const index = pixelIndex(buf.width, x, y);
   return [buf.data[index], buf.data[index + 1], buf.data[index + 2], buf.data[index + 3]];
 }
 
@@ -716,13 +747,13 @@ function convolve1D(
           // 정책 유니온이 한 축의 좌표를 결정하므로 같은 순회가 clamp·wrap·mirror를 모두 쓴다.
           const sampleX = resolveAxisCoord(rawX, source.width, edge);
           const sampleY = resolveAxisCoord(rawY, source.height, edge);
-          const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+          const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
 
           sum += source.data[sampleIndex] * weights[tap];
           multiplyCount += 1;
         }
 
-        out[(y * source.width + x) * 4 + channel] = sum;
+        out[pixelIndex(source.width, x, y) + channel] = sum;
       }
     }
   }
@@ -780,7 +811,7 @@ function convolve(
           for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
             const sampleX = resolveAxisCoord(x + kernelX - radius, source.width, edge);
             const sampleY = resolveAxisCoord(y + kernelY - radius, source.height, edge);
-            const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+            const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
             const weightIndex = kernelY * kernel.side + kernelX;
 
             sum += source.data[sampleIndex] * kernel.weights[weightIndex];
@@ -789,7 +820,7 @@ function convolve(
         }
 
         // 실수 누적값을 모두 구한 뒤 Uint8ClampedArray에 쓰는 이 순간 한 번만 반올림·클램핑한다.
-        out[(y * source.width + x) * 4 + channel] = sum / kernel.divisor;
+        out[pixelIndex(source.width, x, y) + channel] = sum / kernel.divisor;
       }
     }
   }
@@ -1017,7 +1048,8 @@ function main(): void {
   for (let pixel = 0; pixel < 9; pixel += 1) {
     impulseData[pixel * 4 + 3] = 255;
   }
-  impulseData.set([200, 120, 40, 255], (1 * 3 + 1) * 4);
+  // codeStep 444 — 가운데 픽셀 (1, 1)의 자리도 손으로 적지 않고 pixelIndex로 구한다.
+  impulseData.set([200, 120, 40, 255], pixelIndex(3, 1, 1));
   const impulseImage: ImageBuffer<"RGBA8"> = makeImageBuffer(impulseData, 3, 3);
   const gaussianImage = gaussianBlurStage().run(impulseImage);
   const sharpenedImage = sharpenStage().run(impulseImage);
@@ -1034,6 +1066,14 @@ function main(): void {
 
   // 정상 경로와 제자리 덮어쓰기 경로의 두 줄을 한 데모 문자열로 받아 오염의 진행을 나란히 본다.
   console.log(`스크래치 버퍼 ${inPlaceCorruptionDemo()}`);
+
+  // codeStep 444 — 10×20 격자의 (0,5)는 수평이면 오른쪽 끝 열 9로, 수직이면 아래쪽 행 14로 간다.
+  // 두 결과 모두 같은 함수 하나가 direction만 보고 계산한 것이다.
+  console.log(
+    `좌표 재배치 10x20 (0,5) horizontal ` +
+      `${JSON.stringify(remapCoord(0, 5, 10, 20, "horizontal"))} / ` +
+      `vertical ${JSON.stringify(remapCoord(0, 5, 10, 20, "vertical"))}`,
+  );
 }
 
 main();
