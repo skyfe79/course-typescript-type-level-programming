@@ -41,4 +41,13 @@ type Test = MapT<[1, 2, 3], Double>;
 
 console.log("MapT의 F 자리는 여전히 포장된 함수 타입만 받습니다.");
 
+// codeStep 340 — 타입 매개변수를 제네릭 타입처럼 다시 적용할 수 없는 이유를 확인한다.
+
+// F는 어떤 완성된 타입 하나를 받는 타입 매개변수다. F가 나중에 X를 받을 제네릭이라는 정보를 표현하지 못한다.
+// 따라서 MapT를 빼고 가장 단순하게 적어도 F<X>라는 적용 자체가 같은 뿌리에서 거절된다.
+// @ts-expect-error - Type 'F' is not generic.
+type Apply2<F, X> = F<X>;
+
+console.log("타입 매개변수 F는 그 자체로는 절대 다시 제네릭이 될 수 없습니다.");
+
 export {};
