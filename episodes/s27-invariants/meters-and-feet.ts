@@ -73,4 +73,14 @@ function tryToAddDifferentUnits(): void {
   //             Type '"feet"' is not assignable to type '"meters"'.
 }
 
+// codeStep 389 — 안전한 변환 함수
+
+// 변환 함수는 피트를 미터로 환산한다는 의도를 호출부에 명시하고 결과 단위를 Meters로 바꾼다.
+function feetToMeters(value: Measurement<Feet>): Measurement<Meters> {
+  return (value * 0.3048) as Measurement<Meters>;
+}
+
+// 타입이 막는 것은 실수로 단위를 섞는 경우일 뿐, 의도한 변환은 함수 하나로 열려 있다. 실측 출력은 130.48이다.
+console.log(add(meters(100), feetToMeters(feet(100))));
+
 export {};
