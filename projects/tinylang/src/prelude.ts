@@ -1,4 +1,4 @@
-// 이 파일의 네 함수는 호출한 자리에서 결과가 정해질 때까지 기다리는 동기 함수다.
+// 이 파일의 함수들은 호출한 자리에서 결과가 정해질 때까지 기다리는 동기 함수다.
 // input도 Promise를 돌려주지 않고 한 줄이 준비될 때까지 실행을 멈춘다는 점에서 같은 규약을 따른다.
 
 import { readSync } from "node:fs";
@@ -32,6 +32,12 @@ export function random(max: number): number {
   }
 
   return Math.floor(Math.random() * max);
+}
+
+export function toString(value: number | string | boolean): string {
+  // tinylang의 런타임 값은 이 세 종류뿐이므로 String의 기본 변환이 언어의 모든
+  // 값 타입을 빠짐없이 문자열로 옮기며, 타입별 분기를 따로 둘 필요가 없다.
+  return String(value);
 }
 
 export function input(prompt?: string): string {
