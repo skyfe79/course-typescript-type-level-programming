@@ -80,8 +80,13 @@ interface Stage<Kind extends string, In extends PixelFormat, Out extends PixelFo
   readonly out: Out;
 }
 
+// codeStep 434 — 그레이스케일부터 Stage 대신 PixelStage를 확장해 실행 함수를 갖게 한다.
+// PixelStage와 mapPixels의 정의는 파이프라인 타입 설명이 끝난 이 파일 아래쪽에 있다. 인터페이스
+// 이름은 선언 위치보다 앞에서도 참조할 수 있으므로, 여기서는 "무엇을 하는 스테이지인가"를 먼저 읽고
+// "어떻게 도는가"는 뒤에서 읽게 된다.
+interface GrayscaleStage extends PixelStage<"grayscale", "RGBA8", "Gray8"> {}
+
 interface InvertStage extends Stage<"invert", "RGBA8", "RGBA8"> {}
-interface GrayscaleStage extends Stage<"grayscale", "RGBA8", "Gray8"> {}
 interface BrightnessStage extends Stage<"brightness", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
@@ -97,8 +102,14 @@ function invertStage(): InvertStage {
   return { kind: "invert", in: "RGBA8", out: "RGBA8" };
 }
 
+// codeStep 434 — 그레이스케일 스테이지에 공유 순회로 이어지는 실행 함수를 얹는다.
 function grayscaleStage(): GrayscaleStage {
-  return { kind: "grayscale", in: "RGBA8", out: "Gray8" };
+  return {
+    kind: "grayscale",
+    in: "RGBA8",
+    out: "Gray8",
+    run: (buf) => mapPixels(buf, "Gray8", toGrayscale),
+  };
 }
 
 function brightnessStage(amount: number): BrightnessStage {
@@ -258,6 +269,63 @@ function brokenPipelineDemo(): void {
   run(pipeline(grayscaleStage(), brightnessStage(20)));
 }
 
+// codeStep 434 — 네 효과가 함께 쓸 픽셀 순회와 그레이스케일 커널을 만든다.
+// 포맷마다 픽셀 하나가 몇 자리인지를 타입으로 고정한다.
+interface PixelTupleOf {
+  RGBA8: readonly [number, number, number, number];
+  RGB8: readonly [number, number, number];
+  Gray8: readonly [number];
+}
+
+type Pixel<Format extends PixelFormat> = PixelTupleOf[Format];
+
+// 커널은 입력 픽셀 하나를 받아 출력 픽셀 하나를 돌려주는 함수 그 자체다.
+type PixelKernel<In extends PixelFormat, Out extends PixelFormat> = (
+  pixel: Pixel<In>,
+) => Pixel<Out>;
+
+function mapPixels<In extends PixelFormat, Out extends PixelFormat>(
+  source: ImageBuffer<In>,
+  outFormat: Out,
+  kernel: PixelKernel<In, Out>,
+): ImageBuffer<Out> {
+  const pixelCount = source.width * source.height;
+
+  // In은 런타임에 지워지는 팬텀 타입이라 bytesPerPixel에 넘길 포맷 값이 없다.
+  // 그래서 입력 한 픽셀의 바이트 수는 버퍼 전체 길이를 픽셀 수로 나누어 되찾는다.
+  // 출력 포맷은 실제 인자로 받았으므로 기존 bytesPerPixel을 그대로 사용할 수 있다.
+  const inBytes = source.data.length / pixelCount;
+  const outBytes = bytesPerPixel(outFormat);
+  const out = new Uint8ClampedArray(pixelCount * outBytes);
+
+  for (let i = 0; i < pixelCount; i += 1) {
+    const start = i * inBytes;
+    // In이 아직 미해결인 제네릭이라 Pixel<In>의 후보 튜플 길이가 충돌해 never로 줄어든다.
+    // 이 구현 경계에서만 unknown을 거치는 이중 단언으로, 실제 버퍼에서 자른 한 픽셀임을 알려 준다.
+    const pixel = Array.from(source.data.slice(start, start + inBytes)) as unknown as Pixel<In>;
+    // readonly 튜플도 ArrayLike<number>를 만족하므로 set에는 별도 단언이 필요 없다.
+    // Uint8ClampedArray에 쓰는 순간 범위를 벗어난 채널 값도 자동으로 0~255에 맞춰진다.
+    out.set(kernel(pixel), i * outBytes);
+  }
+
+  // 픽셀 포맷과 데이터 길이는 달라져도 이미지의 공간 크기는 그대로 보존한다.
+  return makeImageBuffer<Out>(out, source.width, source.height);
+}
+
+const toGrayscale: PixelKernel<"RGBA8", "Gray8"> = ([r, g, b]) => [
+  Math.round(0.299 * r + 0.587 * g + 0.114 * b),
+];
+
+// Stage는 여전히 "무엇을 할지"만 말하는 데이터이고, PixelStage는 거기에 "어떻게 할지"를 더한다.
+interface PixelStage<Kind extends string, In extends PixelFormat, Out extends PixelFormat>
+  extends Stage<Kind, In, Out> {
+  readonly run: (source: ImageBuffer<In>) => ImageBuffer<Out>;
+}
+
+// run을 얹어도 describeStage의 소진 검사와 CheckAdjacent/pipeline의 포맷 검사는 그대로 동작한다.
+// 그 타입들은 스테이지의 kind·in·out만 읽고, 새 함수 프로퍼티의 구체적인 내용에는 의존하지 않는다.
+// 또한 JSON.stringify는 함수 값 프로퍼티를 생략하므로 기존 plan 출력도 한 글자도 달라지지 않는다.
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -307,6 +375,15 @@ function main(): void {
 
   // 방금 쓴 파일을 같은 함수로 다시 읽는다. 두 줄이 똑같이 찍히면 왕복이 성립한 것이다.
   readPng(OUTPUT_URL);
+
+  // codeStep 434 — 1×1 버퍼로 공유 순회가 그레이스케일 커널 하나를 실행하는 모습을 확인한다.
+  // 네 채널 모두 계산 결과가 0~255 안에 머무는 중간 톤 픽셀을 골라, 여기서는 커널의 계산만 보이게 한다.
+  const samplePixel: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray([200, 140, 90, 255]),
+    1,
+    1,
+  );
+  console.log(`그레이스케일 픽셀 ${Array.from(grayscaleStage().run(samplePixel).data)}`);
 }
 
 main();
