@@ -34,10 +34,19 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   private tableName: string;
   // 선택한 컬럼의 실제 값도 타입 매개변수 Selected와 같은 튜플 모양으로 보관한다.
   private selectedCols: Selected;
+  // codeStep 376에서 추가하는 조건 배열은 다음 스텝의 비교 로직이 모든 연산자 갈래를
+  // 빠짐없이 다룰 수 있도록 operator를 넓은 string이 아니라 ComparisonOp로 제한한다.
+  // 실제 필터링은 아직 하지 않으며 codeStep 378에서 rows가 이 배열을 사용한다.
+  private filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[];
 
-  constructor(tableName: string, selectedCols: Selected = [] as unknown as Selected) {
+  constructor(
+    tableName: string,
+    selectedCols: Selected = [] as unknown as Selected,
+    filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[] = [],
+  ) {
     this.tableName = tableName;
     this.selectedCols = selectedCols;
+    this.filters = filters;
   }
 
   // select는 Row에 실제로 존재하는 컬럼만 가변 인자로 받고, 기존 선택 뒤에 새 선택을 이어 붙인다.
@@ -46,7 +55,18 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
     return new QueryBuilder<Row, [...Selected, ...Cols]>(
       this.tableName,
       [...this.selectedCols, ...cols] as [...Selected, ...Cols],
+      // select는 새 인스턴스를 반환한다. 기존 조건의 사본을 생성자에 넘기지 않으면
+      // where(...).select(...)가 오류 없이 실행되면서 조건만 조용히 사라지게 된다.
+      [...this.filters],
     );
+  }
+
+  // column으로 추론한 K 하나가 operator의 ColumnOperators<Row, K>와 value의 Row[K]를
+  // 함께 결정한다. 따라서 선택한 컬럼에 맞는 연산자와 값만 같은 호출에 넣을 수 있다.
+  // this를 그대로 반환하므로 where 뒤에 select나 where를 이어서 호출할 수 있다.
+  where<K extends keyof Row>(column: K, operator: ColumnOperators<Row, K>, value: Row[K]): this {
+    this.filters.push({ column, operator, value });
+    return this;
   }
 
   // 저장된 테이블을 읽은 뒤 selectedCols에 기록된 컬럼만 새 객체로 옮겨 담는다.
@@ -180,6 +200,23 @@ const nameOperatorsMatch: Eq<ColumnOperators<UsersSchema, "name">, "=" | "!="> =
 const isActiveOperatorsMatch: Eq<ColumnOperators<UsersSchema, "isActive">, "=" | "!="> = true;
 const viewsOperatorsMatch: Eq<ColumnOperators<PostsSchema, "views">, ComparisonOp> = true;
 
-// 아직 where나 필터링 동작은 만들지 않으며, 다음 스텝에서 이 타입을 사용한다.
+// codeStep 376 — 컬럼에 맞는 조건을 빌더에 쌓기
+
+// column으로 정해진 K가 연산자와 값 타입을 함께 결정하므로, 각 컬럼의 값 타입에 맞는
+// 연산자와 값으로 조건을 추가한다. where는 같은 빌더를 반환해 호출 체인을 유지한다.
+const activeUsers = from("users").where("isActive", "=", true);
+const namedUsers = from("users").where("name", "=", "민준");
+const olderIds = from("users").where("id", ">", 3);
+
+// where가 this를 반환해 Row와 Selected 상태를 바꾸지 않는다는 사실을 타입 검사로 고정한다.
+const whereKeepsBuilderMatch: Eq<typeof activeUsers, QueryBuilder<UsersSchema, []>> = true;
+const whereThenSelectMatch: Eq<
+  typeof olderIds extends QueryBuilder<infer R, infer S> ? [R, S] : never,
+  [UsersSchema, []]
+> = true;
+
+// select는 새 인스턴스를 만들기 때문에 생성자가 filters를 받고 그 사본을 전달해야 한다.
+// 전달하지 않으면 where(...).select(...)에서 오류 없이 조건만 조용히 사라진다.
+// rows가 이 조건 배열로 실제 행을 거르는 동작은 codeStep 378에서 추가한다.
 
 export {};
