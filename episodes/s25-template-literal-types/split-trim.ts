@@ -28,4 +28,23 @@ type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1
 
 const tokensMatch: Eq<Tokens, ["a", "b", "c"]> = true;
 
+// codeStep 363 — 타입 레벨 Trim 만들기
+
+// TrimStart는 문자열의 맨 앞에서 공백 하나를 떼어 내고, 남은 Rest를 다시 같은 방식으로 확인한다.
+type TrimStart<S extends string> = S extends ` ${infer Rest}` ? TrimStart<Rest> : S;
+
+// TrimEnd는 같은 head/tail 걷기 원리를 문자열의 반대쪽 끝에 겨눠 뒤쪽 공백을 하나씩 떼어 낸다.
+type TrimEnd<S extends string> = S extends `${infer Rest} ` ? TrimEnd<Rest> : S;
+
+// 앞쪽 공백을 모두 제거한 결과에서 뒤쪽 공백까지 제거하면 양 끝을 다듬은 문자열이 된다.
+type Trim<S extends string> = TrimEnd<TrimStart<S>>;
+
+const padded = "  hi  ";
+type Trimmed = Trim<typeof padded>;
+
+const trimmedMatches: Eq<Trimmed, "hi"> = true;
+
+// 런타임의 trim도 타입 수준의 Trim과 같은 "hi"를 만든다.
+console.log(JSON.stringify(padded.trim()));
+
 export {};
