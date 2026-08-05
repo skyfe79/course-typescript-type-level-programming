@@ -1,6 +1,6 @@
 // 토큰 배열 위를 한 번만 앞으로 이동하면서, 연산자 우선순위가 드러나는 식 트리를 만든다.
 
-import type { Block, Expr, FuncDecl, IfStatement, Param, Statement, TypeName } from "./ast.ts";
+import type { Block, Expr, FuncDecl, IfStatement, Param, Program, Statement, TypeName } from "./ast.ts";
 import { makeDiagnostic } from "./diagnostics.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 import type { Keyword, Operator, Punct, Token, TokenKind } from "./tokens.ts";
@@ -349,8 +349,36 @@ export function createParser(tokens: readonly Token[]) {
 
     if (token.kind === "identifier") {
       advance();
-      // 이번 화에는 이름 자체만 식으로 만든다. 뒤따르는 괄호와 인자를 읽어 call
-      // 노드로 확장하는 일은 ep_210(codeStep 469)의 식별자 분기에서 맡는다.
+
+      // 식별자 바로 뒤의 여는 괄호는 그 이름을 함수로 호출한다는 표식이다. 매개변수
+      // 목록과 대칭으로, 바로 닫히면 0개이고 그렇지 않으면 하나를 먼저 읽은 뒤
+      // 콤마가 있는 동안만 다음 식을 읽어 1개와 N개를 같은 흐름으로 처리한다.
+      if (matchPunct("(")) {
+        const args: Expr[] = [];
+
+        if (!checkPunct(")")) {
+          const firstArg = parseExpression();
+          if (!firstArg.ok) return firstArg;
+          args.push(firstArg.value);
+
+          while (matchPunct(",")) {
+            const arg = parseExpression();
+            if (!arg.ok) return arg;
+            args.push(arg.value);
+          }
+        }
+
+        const closed = expectPunct(")");
+        if (!closed.ok) return closed;
+
+        // callee는 이름 문자열일 뿐이며, 실제로 존재하는 함수인지는 파서가 확인하지
+        // 않는다. 그 확인은 다음 화의 스코프 해석 몫이다. 따라서 factorial 본문에서
+        // factorial(n - 1)을 부르는 재귀도 다른 호출과 완전히 같은 경로로 파싱되며,
+        // 재귀만을 위한 특별 처리는 파서에 없다.
+        return { ok: true, value: { kind: "call", callee: token.name, args } };
+      }
+
+      // 여는 괄호가 이어지지 않으면 호출이 아니라 이름 자체를 가리키는 식이다.
       return { ok: true, value: { kind: "identifier", name: token.name } };
     }
 
@@ -595,6 +623,27 @@ export function createParser(tokens: readonly Token[]) {
     };
   }
 
+  function parseProgram(): ParseResult<Program> {
+    const functions: FuncDecl[] = [];
+    const statements: Statement[] = [];
+
+    // Program이 두 목록을 따로 가지므로, 함수 선언이 파일의 앞·중간·뒤 어디에
+    // 적혀 있든 최상위 문과 섞이지 않고 functions와 statements에 각각 모인다.
+    while (!isAtEnd()) {
+      if (checkKeyword("fn")) {
+        const declaration = parseFnDecl();
+        if (!declaration.ok) return declaration;
+        functions.push(declaration.value);
+      } else {
+        const statement = parseStatement();
+        if (!statement.ok) return statement;
+        statements.push(statement.value);
+      }
+    }
+
+    return { ok: true, value: { kind: "program", functions, statements } };
+  }
+
   // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
   // 들어오고, 개별 우선순위 함수도 교육용 관찰 스크립트에서 계속 확인할 수 있다.
   return {
@@ -613,5 +662,6 @@ export function createParser(tokens: readonly Token[]) {
     parseWhileStatement,
     parseFnDecl,
     parseParam,
+    parseProgram,
   };
 }
