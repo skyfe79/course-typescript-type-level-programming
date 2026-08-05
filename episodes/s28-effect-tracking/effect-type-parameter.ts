@@ -41,4 +41,43 @@ const writeLogReturnsLogging: Eq<
 const configProgram = readConfig("app.json");
 console.log("readConfig 결과에 effects 키가 있는가:", "effects" in configProgram);
 
+// codeStep 401 — 이펙트가 다른 두 프로그램 구분하기
+
+// 파일만 읽는 프로그램은 readConfig의 fileIO 이펙트를 그대로 가진다.
+function loadOnly(path: string): Effectful<string, "fileIO"> {
+  return readConfig(path);
+}
+
+// 파일을 읽고 로그도 남기므로, 두 이펙트 태그를 유니온으로 함께 기록한다.
+function loadAndLog(path: string): Effectful<string, "fileIO" | "logging"> {
+  const config = readConfig(path);
+  const log = writeLog(`loaded ${path}`);
+
+  // 두 이펙트 값 모두 run() 전까지 실행을 미뤘다가, 합성된 프로그램을 실행할 때 차례로 수행한다.
+  return {
+    run: () => {
+      const result = config.run();
+      log.run();
+      return result;
+    },
+  };
+}
+
+// fileIO만 수행하는 프로그램은 같은 이펙트 타입의 자리에 정상적으로 대입된다.
+const ok: Effectful<string, "fileIO"> = loadOnly("app.json");
+
+function tryAssignLoadAndLogToFileIOOnly(): void {
+  // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
+  // @ts-expect-error - loadAndLog는 logging 이펙트를 더 수행하므로 fileIO만 허용하는 자리에 들어갈 수 없다
+  const mismatch: Effectful<string, "fileIO"> = loadAndLog("app.json");
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s28-effect-tracking/effect-type-parameter.ts(71,9): error TS2322: Type 'Effectful<string, "fileIO" | "logging">' is not assignable to type 'Effectful<string, "fileIO">'.
+  //   Type '"fileIO" | "logging"' is not assignable to type '"fileIO"'.
+  //     Type '"logging"' is not assignable to type '"fileIO"'.
+}
+
+// 두 프로그램을 실제로 실행한다. 두 번째 경로에서만 loaded 로그가 한 줄 더 출력된다.
+console.log("loadOnly run():", ok.run());
+console.log("loadAndLog run():", loadAndLog("app.json").run());
+
 export {};
