@@ -202,6 +202,23 @@ function spreadPlanArrayDemo(): void {
   pipeline(...plan);
 }
 
+// codeStep 431 — 튜플의 머리와 꼬리를 분리하며 인접한 스테이지의 포맷을 차례로 검사한다.
+// Head의 입력이 지금까지 누적한 포맷 Acc와 맞으면, Head의 출력을 새 Acc로 삼아 Tail을 계속 훑는다.
+// 튜플이 비면 더 검사할 인접 쌍이 없으므로 그 시점의 Acc가 곧 파이프라인 전체의 출력 포맷이다.
+type CheckAdjacent<Stages extends readonly AnyStage[], Acc extends PixelFormat> =
+  Stages extends readonly [infer Head extends AnyStage, ...infer Tail extends AnyStage[]]
+    ? Head["in"] extends Acc
+      ? CheckAdjacent<Tail, Head["out"]>
+      : never // 임시 — 다음 codeStep에서 실패한 쌍을 이름으로 남기는 오류 전달 타입으로 교체한다.
+    : Acc;
+
+// GoodResult는 모든 인접 관계를 통과한 뒤 마지막 출력인 "Gray8"이 된다.
+type GoodResult = CheckAdjacent<[InvertStage, GrayscaleStage], "RGBA8">;
+
+// BadResult는 grayscale이 내놓은 "Gray8"을 brightness가 받지 못해 never로 무너진다.
+// 어느 쌍이 어떤 포맷 때문에 어긋났는지는 아무것도 남지 않는다 — 이것이 다음 단계에서 고칠 문제다.
+type BadResult = CheckAdjacent<[GrayscaleStage, BrightnessStage], "RGBA8">;
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
