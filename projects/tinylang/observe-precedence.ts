@@ -20,6 +20,8 @@ function describeExpr(expr: Expr): string {
       return `unary(${expr.operator}, ${describeExpr(expr.operand)})`;
     case "call":
       return `call(${expr.callee}${expr.args.length === 0 ? "" : `, ${expr.args.map(describeExpr).join(", ")}`})`;
+    case "ternary":
+      return `ternary(${describeExpr(expr.condition)}, ${describeExpr(expr.whenTrue)}, ${describeExpr(expr.whenFalse)})`;
   }
 }
 

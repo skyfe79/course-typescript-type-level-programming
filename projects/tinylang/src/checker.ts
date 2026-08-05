@@ -10,6 +10,9 @@ import type {
   TypeName,
   UnaryOperator,
 } from "./ast.ts";
+// 이 파일은 보강된 ternary 갈래를 직접 처리하므로, 단일 파일 진입점으로 타입을
+// 검사할 때도 그 선언이 프로그램에 포함되도록 타입 전용 의존을 명시한다.
+import type {} from "./augment-ternary.ts";
 import { makeDiagnostic, toLine, toOffset } from "./diagnostics.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 // 이름 목록의 정본은 emitter.ts의 BUILTIN_NAMES다. 타입만 가져오면 실행 시점의
@@ -246,6 +249,38 @@ export function checkExpr(expr: Expr, scope: Scope, ctx: CheckContext): CheckRes
     case "unary": {
       const operand = checkExpr(expr.operand, scope, ctx);
       return checkUnary(expr.operator, operand);
+    }
+
+    case "ternary": {
+      // 아직 렉서와 파서에는 `? :` 문법이 없지만, 보강 파일이 등록한 AST를 손으로
+      // 조립해 넣으면 검사기는 다른 식과 똑같이 자식을 재귀 검사해야 한다. 앞선
+      // 자식이 실패했을 때 그 결과를 그대로 올려 연쇄 진단을 만들지 않는다.
+      const condition = checkExpr(expr.condition, scope, ctx);
+      if (!condition.ok) return condition;
+      if (condition.type !== "boolean") {
+        return {
+          ok: false,
+          diagnostics: [typeError(
+            `삼항식의 조건은 boolean 타입이어야 하지만 ${condition.type} 타입입니다`,
+          )],
+        };
+      }
+
+      const whenTrue = checkExpr(expr.whenTrue, scope, ctx);
+      if (!whenTrue.ok) return whenTrue;
+      const whenFalse = checkExpr(expr.whenFalse, scope, ctx);
+      if (!whenFalse.ok) return whenFalse;
+
+      if (whenTrue.type !== whenFalse.type) {
+        return {
+          ok: false,
+          diagnostics: [typeError(
+            `삼항식의 두 갈래 타입이 같아야 합니다 (현재 ${whenTrue.type}, ${whenFalse.type})`,
+          )],
+        };
+      }
+
+      return { ok: true, type: whenTrue.type };
     }
 
     case "call": {
