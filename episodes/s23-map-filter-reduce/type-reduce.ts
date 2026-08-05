@@ -201,4 +201,41 @@ const csvIsExact: Eq<Csv, "red,green,blue"> = true;
 // @ts-expect-error - JoinF는 원소 사이를 쉼표로 연결하므로 공백으로 연결한 문자열은 결과가 아니다
 const csvIsNotSpaced: Eq<Csv, "red green blue"> = true;
 
+// codeStep 337 — ReduceT로 엔트리 튜플을 객체 타입으로 합친다.
+
+// 읽기 전용 [키, 값] 튜플에 이름을 붙여 타입 레벨 결합과 값 레벨 함수가 같은 입력 모양을 공유한다.
+type Entry = readonly [string, unknown];
+
+// ToObjectF도 제네릭 화살표 대신 TypeFn2의 슬롯을 채우는 방식으로 적용한다.
+// 키와 값은 this["item"] 자체를 조건부 타입으로 직접 분해해야 각각의 리터럴 타입으로 추론된다.
+// 중첩된 infer 제약 안에서 다시 K와 V를 추론하면 string과 unknown으로 넓어질 수 있으므로 쓰지 않는다.
+// acc는 새 Record와 인터섹션할 수 있으므로 별도 제약으로 넓히지 않고 지금까지 만든 타입을 그대로 잇는다.
+interface ToObjectF extends TypeFn2 {
+  readonly out: this["item"] extends readonly [
+    infer K extends string,
+    infer V
+  ]
+    ? this["acc"] & Record<K, V>
+    : never;
+}
+
+type Entries = readonly [readonly ["id", 1], readonly ["name", "Ada"]];
+type Merged = ReduceT<Entries, ToObjectF, {}>;
+
+// 시작값 {}에 각 Record가 왼쪽부터 교차되어 원래의 인터섹션 형태까지 정확히 남는다.
+type ExpectedMerged = {} & Record<"id", 1> & Record<"name", "Ada">;
+const mergedIsExact: Eq<Merged, ExpectedMerged> = true;
+// @ts-expect-error - 두 번째 엔트리도 합쳐지므로 name 속성이 없는 객체는 Merged가 아니다
+const mergedCannotDropName: Merged = { id: 1 };
+
+// 값 레벨에서도 같은 엔트리 배열을 Object.fromEntries에 넘기면 타입 레벨 폴드와 같은 객체가 만들어진다.
+function toObject<T extends readonly Entry[]>(entries: T) {
+  return Object.fromEntries(entries);
+}
+
+console.log("Merged:", toObject([["id", 1], ["name", "Ada"]] as const));
+
+// Sum, Join, ToObject에서 바뀐 것은 결합 방식 F와 시작값 Init뿐이다.
+// 머리를 결합하고 꼬리로 진행하는 재귀는 세 경우 모두 처음 만든 ReduceT를 그대로 사용한다.
+
 export {};
