@@ -57,4 +57,27 @@ function chain<A, B, EA extends EffectTag, EB extends EffectTag>(
   return { run: () => next(step.run()).run() };
 }
 
+// codeStep 403 — 두 단계를 이어 붙여 누적 결과 확인하기
+
+const step1 = readConfig("app.json");
+const step2 = chain(step1, (config) => writeLog(`loaded ${config}`));
+const step3 = chain(step2, () => readConfig("secrets.json"));
+
+// 첫 합성에서는 fileIO와 logging이 합쳐진다.
+const step2CarriesBothEffects: Eq<
+  typeof step2,
+  Effectful<void, "fileIO" | "logging">
+> = true;
+
+// 두 번째 fileIO는 유니온에 중복해서 쌓이지 않는다.
+// 같은 유니온 원소는 하나로 합쳐지므로, 합성을 반복한 뒤에도 이펙트 집합은 정확히 두 개다.
+const step3KeepsUniqueEffects: Eq<
+  typeof step3,
+  Effectful<string, "fileIO" | "logging">
+> = true;
+
+// step3를 실행하면 앞 단계의 loaded 로그가 먼저 찍히고, 마지막 파일 읽기 결과가 반환된다.
+console.log("chain으로 이어 붙인 프로그램 실행:");
+console.log("step3 run() 최종 결과:", step3.run());
+
 export {};
