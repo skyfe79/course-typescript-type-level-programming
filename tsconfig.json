@@ -18,6 +18,7 @@
   "exclude": [
     "node_modules",
     "episodes/s20-why-type-level/instantiation-depth-limit.ts",
-    "episodes/s21-conditional-types-infer/recursion-lab.ts"
+    "episodes/s21-conditional-types-infer/recursion-lab.ts",
+    "episodes/s29-diagnostics/type-tests-regression.ts"
   ]
 }
