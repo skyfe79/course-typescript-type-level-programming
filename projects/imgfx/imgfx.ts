@@ -543,6 +543,151 @@ const saturateKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
     ];
   };
 
+// codeStep 441 — 컨볼루션의 중간 결과만큼은 8비트 이미지 버퍼와 다른 표현이 필요하다.
+// 스크래치 버퍼는 중간 결과를 8비트로 반올림하지 않고 그대로 들고 있어야 한다.
+interface ScratchBuffer {
+  readonly data: Float64Array;
+  readonly width: number;
+  readonly height: number;
+}
+
+// 박스 커널은 가로 한 번, 세로 한 번으로 나눌 수 있다. 축 유니온은 두 순회의 방향을 제한한다.
+type ConvolveAxis = "row" | "column";
+
+// 직접 순회와 분리 순회가 실제로 가중치 곱셈을 몇 번 수행했는지 같은 카운터로 비교한다.
+let multiplyCount = 0;
+
+function resetMultiplyCount(): void {
+  multiplyCount = 0;
+}
+
+function convolve1D(
+  source: ImageBuffer<"RGBA8"> | ScratchBuffer,
+  size: number,
+  axis: ConvolveAxis,
+): ScratchBuffer {
+  const out = new Float64Array(source.data.length);
+  const radius = Math.floor(size / 2);
+  // 박스 블러의 1차원 커널은 모든 자리의 무게가 같다. 평균을 뒤로 미루지 않고 가중치 자체에
+  // 담아 두면 아래 곱셈 한 번이 곧 가중치 곱셈 한 번이라, 세는 횟수가 실제 연산과 일치한다.
+  const weights = new Array<number>(size).fill(1 / size);
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+
+        for (let tap = 0; tap < size; tap += 1) {
+          const offset = tap - radius;
+          const rawX = axis === "row" ? x + offset : x;
+          const rawY = axis === "column" ? y + offset : y;
+          // 이미지 밖으로 나간 좌표는 우선 가장 가까운 가장자리로 고정한다.
+          // 이 방법을 고를 수 있게 만드는 것은 다음 codeStep의 일이다.
+          const sampleX = Math.max(0, Math.min(source.width - 1, rawX));
+          const sampleY = Math.max(0, Math.min(source.height - 1, rawY));
+          const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+
+          sum += source.data[sampleIndex] * weights[tap];
+          multiplyCount += 1;
+        }
+
+        out[(y * source.width + x) * 4 + channel] = sum;
+      }
+    }
+  }
+
+  return { data: out, width: source.width, height: source.height };
+}
+
+function scratchToImage(scratch: ScratchBuffer): ImageBuffer<"RGBA8"> {
+  // Float64Array를 최종 배열 생성자에 건네는 이 지점에서 처음이자 마지막 반올림·클램핑이 일어난다.
+  return makeImageBuffer(
+    new Uint8ClampedArray(scratch.data),
+    scratch.width,
+    scratch.height,
+  );
+}
+
+// codeStep 441 — 5×5 박스 커널의 스물다섯 자리도 홀수의 제곱이라 Kernel 검사를 그대로 통과한다.
+// 가중치가 모두 1이고 divisor가 25이므로, 이 커널을 한 번에 적용하는 것이 곧 5×5 평균이다.
+const boxKernel5x5: Kernel<
+  readonly [
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+  ]
+> = {
+  weights: [
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+  ],
+  side: 5,
+  divisor: 25,
+};
+
+// codeStep 441 — 검사를 통과한 정사각 커널을 각 픽셀 중앙에 놓고 한 번에 적용하는 일반 순회다.
+// 분리 경로와 곱셈 횟수를 대조하려고 여기서 먼저 만들고, 뒤에서 가우시안·샤픈이 그대로 재사용한다.
+function convolve(
+  source: ImageBuffer<"RGBA8">,
+  kernel: KernelShape<readonly number[]>,
+): ImageBuffer<"RGBA8"> {
+  const out = new Uint8ClampedArray(source.data.length);
+  const radius = Math.floor(kernel.side / 2);
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+
+        for (let kernelY = 0; kernelY < kernel.side; kernelY += 1) {
+          for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
+            // 여기서도 가장자리는 아직 가장 가까운 픽셀로 고정해 둔다.
+            const sampleX = Math.max(0, Math.min(source.width - 1, x + kernelX - radius));
+            const sampleY = Math.max(0, Math.min(source.height - 1, y + kernelY - radius));
+            const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+            const weightIndex = kernelY * kernel.side + kernelX;
+
+            sum += source.data[sampleIndex] * kernel.weights[weightIndex];
+            multiplyCount += 1;
+          }
+        }
+
+        // 실수 누적값을 모두 구한 뒤 Uint8ClampedArray에 쓰는 이 순간 한 번만 반올림·클램핑한다.
+        out[(y * source.width + x) * 4 + channel] = sum / kernel.divisor;
+      }
+    }
+  }
+
+  return makeImageBuffer(out, source.width, source.height);
+}
+
+function boxBlurSeparable(
+  buf: ImageBuffer<"RGBA8">,
+  size: number,
+): ImageBuffer<"RGBA8"> {
+  const rows = convolve1D(buf, size, "row");
+  const columns = convolve1D(rows, size, "column");
+  return scratchToImage(columns);
+}
+
+function maxChannelDifference(
+  a: ImageBuffer<"RGBA8">,
+  b: ImageBuffer<"RGBA8">,
+): number {
+  let maxDifference = 0;
+
+  for (let i = 0; i < a.data.length; i += 1) {
+    maxDifference = Math.max(maxDifference, Math.abs(a.data[i] - b.data[i]));
+  }
+
+  return maxDifference;
+}
+
 // codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
 function clampingContrast(): string {
   const clamped = new Uint8ClampedArray(2);
@@ -660,6 +805,20 @@ function main(): void {
   console.log(
     `커널 3x3 길이=${boxKernel3x3.weights.length} side=${boxKernel3x3.side} ` +
       `divisor=${boxKernel3x3.divisor}`,
+  );
+
+  // codeStep 441 — 검사된 5×5 커널을 한 번에 적용하는 순회와 1×5·5×1 분리 순회를
+  // 같은 실제 PNG로 비교한다. 결과는 같고 곱셈 횟수만 달라야 한다.
+  resetMultiplyCount();
+  const directBoxBlur = convolve(decodedImage, boxKernel5x5);
+  const directMultiplyCount = multiplyCount;
+  resetMultiplyCount();
+  const separableBoxBlur = boxBlurSeparable(decodedImage, 5);
+  const separableMultiplyCount = multiplyCount;
+  console.log(
+    `박스 블러 5x5 곱셈 직접 ${directMultiplyCount} (픽셀·채널당 25) / ` +
+      `분리 ${separableMultiplyCount} (10) / ` +
+      `최대 채널 차이 ${maxChannelDifference(directBoxBlur, separableBoxBlur)}`,
   );
 
 }
