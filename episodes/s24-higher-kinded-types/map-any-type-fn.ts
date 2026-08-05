@@ -52,4 +52,35 @@ type Check = MapT<[1, 2, 3], Double>;
 const check: Check = [[1, 1], [2, 2], [3, 3]];
 const checkExact: [[1, 1], [2, 2], [3, 3]] = check;
 
+// codeStep 345 — 여러 타입 함수로 MapT 실행해 보기
+
+// ToArray는 입력 하나를 길이 1인 튜플로 감싼다.
+interface ToArray extends TypeFn {
+  readonly apply: [this["input"]];
+}
+
+// Widen은 숫자 리터럴만 number로 넓히고, 숫자가 아닌 입력은 원래 타입을 보존한다.
+interface Widen extends TypeFn {
+  readonly apply: this["input"] extends number ? number : this["input"];
+}
+
+// 세 타입 함수는 MapT의 본문을 전혀 바꾸지 않고 같은 Apply 경로를 통과한다.
+type R1 = MapT<[1, 2, 3], Double>;   // [[1, 1], [2, 2], [3, 3]]
+type R2 = MapT<[1, 2, 3], ToArray>;  // [[1], [2], [3]]
+type R3 = MapT<[1, 2, 3], Widen>;    // [number, number, number]
+
+// R1은 Check와 같은 계산이며, 양방향 대입으로 다시 한 번 정확한 결과를 고정한다.
+const r1: R1 = [[1, 1], [2, 2], [3, 3]];
+const r1Exact: [[1, 1], [2, 2], [3, 3]] = r1;
+
+// ToArray도 각 입력 리터럴을 잃지 않고 길이 1인 튜플로 감싼다.
+const r2: R2 = [[1], [2], [3]];
+const r2Exact: [[1], [2], [3]] = r2;
+
+// 입력과 다른 숫자도 들어가므로 R3의 세 자리가 숫자 리터럴이 아니라 number로 넓어졌음을 알 수 있다.
+const r3: R3 = [10, 20, 30];
+const r3Exact: [number, number, number] = r3;
+
+console.log("세 타입 함수 모두 MapT 본문을 고치지 않고 통과했습니다.");
+
 export {};
