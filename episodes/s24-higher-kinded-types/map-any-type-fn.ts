@@ -23,4 +23,33 @@ const oldCheck: OldCheck = [[1, 1], [2, 2], [3, 3]];
 // @ts-expect-error - OldCheck의 각 원소는 [unknown, unknown]이므로 정확한 리터럴 튜플에 대입할 수 없다.
 const oldCheckExact: [[1, 1], [2, 2], [3, 3]] = oldCheck;
 
+// codeStep 344 — apply 슬롯을 받도록 MapT 고치기
+
+// TypeFn은 아직 채우지 않은 input과 그 입력으로 계산할 apply를 함께 가진 타입 함수의 공통 모양이다.
+interface TypeFn {
+  readonly input: unknown;
+  readonly apply: unknown;
+}
+
+// F의 input 슬롯을 X로 채운 뒤 apply 멤버를 읽으면 타입 함수를 실제 입력에 적용한 결과가 된다.
+type Apply<F extends TypeFn, X> = (F & { readonly input: X })["apply"];
+
+// Double은 받은 입력을 두 번 보존하는 타입 함수다.
+interface Double extends TypeFn {
+  readonly apply: [this["input"], this["input"]];
+}
+
+// F의 제약은 화살표 타입에서 TypeFn으로, 머리에 적용하는 식은 조건부 추론에서 Apply로 바뀐다.
+// 머리와 꼬리를 분해하고 결과를 앞에서부터 쌓는 재귀 구조는 MapOld와 한 글자도 다르지 않다.
+type MapT<L extends readonly unknown[], F extends TypeFn> =
+  L extends readonly [infer Head, ...infer Tail extends readonly unknown[]]
+    ? [Apply<F, Head>, ...MapT<Tail, F>]
+    : [];
+
+type Check = MapT<[1, 2, 3], Double>;
+
+// 양방향 대입이 모두 통과하므로 각 입력 리터럴이 Double의 결과에도 그대로 살아 있다.
+const check: Check = [[1, 1], [2, 2], [3, 3]];
+const checkExact: [[1, 1], [2, 2], [3, 3]] = check;
+
 export {};
