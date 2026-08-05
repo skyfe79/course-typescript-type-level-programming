@@ -154,4 +154,32 @@ for (const row of withEmail) {
   console.log(row.id, row.name, row.email); // 선택한 세 컬럼을 모두 행별로 보여 주는 출력이다.
 }
 
+// codeStep 375 — 컬럼 타입에서 연산자 유니온 뽑아내기
+
+// 비교에 사용할 수 있는 여섯 연산자를 하나의 유니온으로 모아 둔다.
+type ComparisonOp = "=" | "!=" | ">" | "<" | ">=" | "<=";
+
+// OperatorsFor는 값 타입 V를 검사해 그 타입에 맞는 연산자 유니온을 고르는 조건부 타입이다.
+// 숫자 컬럼은 값의 크기를 비교하는 데 뜻이 있으므로 여섯 연산자를 모두 허용한다.
+// 문자열과 불리언 컬럼은 같다거나 다르다는 비교만 뜻이 있으므로 "="와 "!="만 남긴다.
+// boolean은 사실 true | false 유니온이라 조건부 타입이 두 갈래로 분배되지만,
+// 두 갈래가 모두 "=" | "!="로 계산되므로 다시 합쳐도 결과는 그대로이다.
+type OperatorsFor<V> = V extends number
+  ? ComparisonOp
+  : V extends string | boolean
+  ? "=" | "!="
+  : never;
+
+// ColumnOperators는 Row와 컬럼 키 K만 받아 Row[K]로 실제 컬럼 값 타입을 꺼낸다.
+// 꺼낸 값 타입을 OperatorsFor에 넘기므로 호출부는 값 타입을 따로 적지 않아도 된다.
+type ColumnOperators<Row, K extends keyof Row> = OperatorsFor<Row[K]>;
+
+// 각 컬럼에서 계산된 연산자 유니온을 Eq 단언으로 고정해 타입 규칙을 확인한다.
+const idOperatorsMatch: Eq<ColumnOperators<UsersSchema, "id">, ComparisonOp> = true;
+const nameOperatorsMatch: Eq<ColumnOperators<UsersSchema, "name">, "=" | "!="> = true;
+const isActiveOperatorsMatch: Eq<ColumnOperators<UsersSchema, "isActive">, "=" | "!="> = true;
+const viewsOperatorsMatch: Eq<ColumnOperators<PostsSchema, "views">, ComparisonOp> = true;
+
+// 아직 where나 필터링 동작은 만들지 않으며, 다음 스텝에서 이 타입을 사용한다.
+
 export {};
