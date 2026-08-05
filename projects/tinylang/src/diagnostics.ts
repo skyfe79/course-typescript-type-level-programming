@@ -21,3 +21,27 @@ export type Line = number & { readonly [lineBrand]: true };
 export function toLine(n: number): Line {
   return n as Line;
 }
+
+// 오류와 경고를 문자열 전체로 넓히지 않으면 진단 소비자가 두 경우를 빠짐없이
+// 나눌 수 있다. 이후 단계가 새 심각도를 추가하면 그 변경도 타입을 따라 전파된다.
+export type Severity = "error" | "warning";
+
+// 진단은 메시지 안에 위치를 중복해서 끼워 넣지 않는다. 단위가 구분된 필드로
+// 보관해야 출력 형식을 바꾸거나 위치별로 정렬할 때 문자열을 다시 파싱하지 않는다.
+export type Diagnostic = {
+  readonly severity: Severity;
+  readonly message: string;
+  readonly offset: Offset;
+  readonly line: Line;
+};
+
+// 진단 객체를 직접 조립하는 대신 이 생성 경계를 공통으로 거치게 한다. 필드가
+// 늘어나더라도 렉서와 파서는 이 함수의 계약을 따라 같은 모양의 값을 만든다.
+export function makeDiagnostic(
+  severity: Severity,
+  message: string,
+  offset: Offset,
+  line: Line,
+): Diagnostic {
+  return { severity, message, offset, line };
+}

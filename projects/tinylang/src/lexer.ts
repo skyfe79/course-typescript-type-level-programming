@@ -1,3 +1,7 @@
+// 문자를 토큰으로 나누고, 각 시작 위치와 복구 가능한 진단을 값으로 돌려준다.
+
+import { makeDiagnostic, toLine, toOffset } from "./diagnostics.ts";
+import type { Diagnostic } from "./diagnostics.ts";
 import type { Keyword, Operator, Punct, Token } from "./tokens.ts";
 
 // 렉서가 한 문자를 보았을 때 선택할 수 있는 갈래를 문자열 리터럴 유니온으로
@@ -69,23 +73,37 @@ function findPunct(candidate: string): Punct | undefined {
   return PUNCTS.find((punct) => punct === candidate);
 }
 
-export function tokenize(source: string): Token[] {
+// 성공한 토큰과 진단을 함께 값으로 돌려주면 호출자는 예외를 잡지 않아도 된다.
+// readonly 배열로 공개해 렉싱이 끝난 결과를 바깥에서 고치는 일도 막는다.
+export type LexResult = {
+  readonly tokens: readonly Token[];
+  readonly diagnostics: readonly Diagnostic[];
+};
+
+export function tokenize(source: string): LexResult {
   // Token의 각 필드는 readonly지만, 렉싱 도중 결과 배열에 새 토큰을 push하는 것은
   // 별개의 일이다. 완성된 토큰 객체의 필드만 이후에 바꿀 수 없다.
   const tokens: Token[] = [];
+  const diagnostics: Diagnostic[] = [];
   let pos = 0;
+  // 사람이 읽는 줄 번호는 1부터 시작한다. offset은 문자열 인덱스이므로 0부터다.
+  let line = 1;
 
   while (pos < source.length) {
     const charClass = classify(source[pos]);
 
     switch (charClass) {
       case "whitespace": {
+        if (source[pos] === "\n") {
+          line += 1;
+        }
         pos += 1;
         break;
       }
 
       case "digit": {
         const start = pos;
+        const startLine = line;
         while (classify(source[pos]) === "digit") {
           pos += 1;
         }
@@ -93,12 +111,18 @@ export function tokenize(source: string): Token[] {
         // 시작과 끝 위치로 slice하면 매 글자를 더하지 않아도 원래 숫자 표기를
         // 그대로 얻는다. 이 화의 작은 언어는 소수점 없는 정수만 다룬다.
         const digits = source.slice(start, pos);
-        tokens.push({ kind: "number", value: Number(digits) });
+        tokens.push({
+          kind: "number",
+          value: Number(digits),
+          offset: toOffset(start),
+          line: toLine(startLine),
+        });
         break;
       }
 
       case "alpha": {
         const start = pos;
+        const startLine = line;
         pos += 1;
 
         // 첫 글자는 alpha여야 하지만, 그 뒤에는 숫자도 올 수 있다. 따라서 name1은
@@ -110,38 +134,82 @@ export function tokenize(source: string): Token[] {
         const word = source.slice(start, pos);
         const keyword = findKeyword(word);
         if (keyword !== undefined) {
-          tokens.push({ kind: "keyword", word: keyword });
+          tokens.push({
+            kind: "keyword",
+            word: keyword,
+            offset: toOffset(start),
+            line: toLine(startLine),
+          });
         } else {
-          tokens.push({ kind: "identifier", name: word });
+          tokens.push({
+            kind: "identifier",
+            name: word,
+            offset: toOffset(start),
+            line: toLine(startLine),
+          });
         }
         break;
       }
 
       case "quote": {
-        // 여는 따옴표는 값에 포함하지 않고, 닫는 따옴표 직전까지만 slice한다.
+        // 토큰과 오류의 위치는 문자열 내용이 아니라 여는 따옴표를 기준으로 한다.
+        const tokenStart = pos;
+        const startLine = line;
         pos += 1;
-        const start = pos;
+        const valueStart = pos;
 
         while (classify(source[pos]) !== "quote") {
           if (classify(source[pos]) === "eof") {
-            throw new Error(`닫는 따옴표가 없는 문자열입니다. 시작 위치: ${start - 1}`);
+            diagnostics.push(makeDiagnostic(
+              "error",
+              "닫는 따옴표가 없는 문자열입니다",
+              toOffset(tokenStart),
+              toLine(startLine),
+            ));
+            // 문자열 안에서는 닫는 따옴표 말고 안전하게 다시 시작할 지점을 알 수 없다.
+            // 입력 끝까지 소비한 상태로 두어 바깥 루프도 자연스럽게 끝낸다.
+            pos = source.length;
+            break;
+          }
+
+          // 여러 줄 문자열도 허용하므로, 내용 속 개행 역시 이후 토큰의 줄 번호에
+          // 반영해야 한다. 공백 분기만 세면 이 개행을 빠뜨리게 된다.
+          if (source[pos] === "\n") {
+            line += 1;
           }
           pos += 1;
         }
 
-        const value = source.slice(start, pos);
+        if (pos >= source.length) {
+          break;
+        }
+
+        // 여는 따옴표는 값에 포함하지 않고, 닫는 따옴표 직전까지만 slice한다.
+        const value = source.slice(valueStart, pos);
         pos += 1;
-        tokens.push({ kind: "string", value });
+        tokens.push({
+          kind: "string",
+          value,
+          offset: toOffset(tokenStart),
+          line: toLine(startLine),
+        });
         break;
       }
 
       case "operator": {
+        const start = pos;
+        const startLine = line;
         // ==를 = 두 개로 잘못 자르지 않도록 언제나 두 글자 후보를 먼저 찾는다.
         // 성공한 find 결과는 Operator이므로 별도의 타입 단언이 필요 없다.
         const twoChars = source.slice(pos, pos + 2);
         const twoCharOperator = findOperator(twoChars, TWO_CHAR_OPERATORS);
         if (twoCharOperator !== undefined) {
-          tokens.push({ kind: "operator", op: twoCharOperator });
+          tokens.push({
+            kind: "operator",
+            op: twoCharOperator,
+            offset: toOffset(start),
+            line: toLine(startLine),
+          });
           pos += 2;
           break;
         }
@@ -149,26 +217,51 @@ export function tokenize(source: string): Token[] {
         const oneChar = source.slice(pos, pos + 1);
         const oneCharOperator = findOperator(oneChar, ONE_CHAR_OPERATORS);
         if (oneCharOperator === undefined) {
-          // 지금은 즉시 멈추지만, 다음 화 ep_207에서는 이 자리를 Diagnostic 값으로
-          // 바꾸어 오류 위치와 원인을 데이터로 전달한다.
-          throw new Error(`알 수 없는 연산자 '${oneChar}' (위치 ${pos})`);
+          diagnostics.push(makeDiagnostic(
+            "error",
+            `알 수 없는 연산자 '${oneChar}'입니다`,
+            toOffset(start),
+            toLine(startLine),
+          ));
+          // 예외로 멈추지 않고 문제 문자 하나만 건너뛰면 나머지 입력도 읽을 수 있다.
+          // 그래서 한 번의 렉싱 결과에 서로 떨어진 여러 오류를 함께 모아 보여 준다.
+          pos += 1;
+          break;
         }
 
-        tokens.push({ kind: "operator", op: oneCharOperator });
+        tokens.push({
+          kind: "operator",
+          op: oneCharOperator,
+          offset: toOffset(start),
+          line: toLine(startLine),
+        });
         pos += 1;
         break;
       }
 
       case "punct": {
+        const start = pos;
+        const startLine = line;
         const candidate = source.slice(pos, pos + 1);
         const punct = findPunct(candidate);
         if (punct === undefined) {
-          // 허용하지 않는 일반 문자도 다음 화 ep_207에서는 throw 대신 Diagnostic
-          // 값으로 바뀐다. 이번 화에는 문제 문자와 위치를 분명하게 보여 준다.
-          throw new Error(`알 수 없는 문자 '${candidate}' (위치 ${pos})`);
+          diagnostics.push(makeDiagnostic(
+            "error",
+            `알 수 없는 문자 '${candidate}'입니다`,
+            toOffset(start),
+            toLine(startLine),
+          ));
+          // 이 경우도 오류를 값으로 남긴 뒤 한 문자만 건너뛰어 다음 오류를 찾는다.
+          pos += 1;
+          break;
         }
 
-        tokens.push({ kind: "punct", char: punct });
+        tokens.push({
+          kind: "punct",
+          char: punct,
+          offset: toOffset(start),
+          line: toLine(startLine),
+        });
         pos += 1;
         break;
       }
@@ -183,6 +276,11 @@ export function tokenize(source: string): Token[] {
   }
 
   // 파서는 배열 길이를 거듭 검사하는 대신 이 마지막 토큰을 보고 입력의 끝을 안다.
-  tokens.push({ kind: "eof" });
-  return tokens;
+  // eof도 실제 입력의 마지막 오프셋과, 개행을 모두 센 마지막 줄을 함께 가진다.
+  tokens.push({
+    kind: "eof",
+    offset: toOffset(source.length),
+    line: toLine(line),
+  });
+  return { tokens, diagnostics };
 }
