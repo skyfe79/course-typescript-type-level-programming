@@ -36,7 +36,7 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   private selectedCols: Selected;
   // codeStep 376에서 추가하는 조건 배열은 다음 스텝의 비교 로직이 모든 연산자 갈래를
   // 빠짐없이 다룰 수 있도록 operator를 넓은 string이 아니라 ComparisonOp로 제한한다.
-  // 실제 필터링은 아직 하지 않으며 codeStep 378에서 rows가 이 배열을 사용한다.
+  // codeStep 378에서는 rows가 이 배열을 순회해 실제 행도 같은 조건으로 거른다.
   private filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[];
 
   constructor(
@@ -73,10 +73,17 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   // select를 호출하지 않아 선택 목록이 비어 있으면 JSON 첫 행의 모든 컬럼을 사용한다.
   rows(): Pick<Row, Selected[number]>[] {
     const table = loadTable<Row>(this.tableName);
+    // 선택할 컬럼 목록은 필터링 결과가 아니라 원본 테이블의 첫 행에서 알아낸다.
+    // 조건에 맞는 행이 하나도 없더라도 filteredRows[0]을 읽지 않으므로 컬럼을 알아내는 과정이 깨지지 않는다.
     const cols = (this.selectedCols.length > 0
       ? this.selectedCols
       : Object.keys(table[0] as object)) as readonly Selected[number][];
-    return table.map((row) => {
+    // every를 사용하므로 조건이 여러 개 쌓였을 때 모든 조건을 만족하는 행만 남는다.
+    // where의 타입 검사를 통과한 연산자와 값이 filters에 쌓이고, 실행 시점의 비교도 바로 그 배열을 사용한다.
+    const filteredRows = table.filter((row) =>
+      this.filters.every((filter) => matchesFilter(row[filter.column], filter.operator, filter.value)),
+    );
+    return filteredRows.map((row) => {
       const picked = {} as Record<PropertyKey, unknown>;
       for (const col of cols) picked[col as PropertyKey] = row[col];
       return picked as Pick<Row, Selected[number]>;
@@ -142,6 +149,27 @@ qb.select("nope");
 function loadTable<Row>(tableName: string): Row[] {
   const url = new URL(`./data/${tableName}.json`, import.meta.url);
   return JSON.parse(readFileSync(url, "utf8")) as Row[];
+}
+
+// filters에 저장된 조건 하나를 실제 행의 값과 비교한다.
+// ComparisonOp의 여섯 갈래를 switch가 빠짐없이 다루므로 별도의 default 분기는 필요하지 않다.
+function matchesFilter(left: unknown, operator: ComparisonOp, right: unknown): boolean {
+  switch (operator) {
+    case "=":
+      return left === right;
+    case "!=":
+      return left !== right;
+    case ">":
+      // 타입 시스템이 부등호를 숫자 컬럼에만 허용하므로 이 갈래에 도달한 두 값은 숫자다.
+      // 따라서 unknown을 number로 좁혀 실행 시점의 크기 비교를 하는 것이 안전하다.
+      return (left as number) > (right as number);
+    case "<":
+      return (left as number) < (right as number);
+    case ">=":
+      return (left as number) >= (right as number);
+    case "<=":
+      return (left as number) <= (right as number);
+  }
 }
 
 const pickedRows = qb.select("id", "name").rows();
@@ -235,5 +263,46 @@ from("users").where("isActive", ">", true);
 // 아니라 연산자 하나뿐이라는 사실을 바로 아래 호출과 Eq 단언이 함께 증명한다.
 const activeExactly = from("users").where("isActive", "=", true);
 const activeExactlyMatch: Eq<typeof activeExactly, QueryBuilder<UsersSchema, []>> = true;
+
+// codeStep 378 — 쌓인 조건으로 실제 행 필터링하기
+
+// number 컬럼 id에는 여섯 비교 연산자가 모두 허용된다. >= 3 조건을 실제 데이터에 적용하면
+// id가 3, 5, 4인 세 행만 남아, filters가 타입 검사에만 쓰이는 것이 아니라 실행 결과도 거른다.
+const idAtLeastThree = from("users").where("id", ">=", 3).select("id", "name").rows();
+console.log(idAtLeastThree);
+
+// select를 먼저 호출하고 같은 where를 뒤에 이어도 바로 위와 완전히 같은 세 행이 나온다.
+// codeStep 376에서 select가 새 빌더를 만들 때 생성자에 기존 filters의 사본을 넘기도록 고친 덕분이다.
+// 그 전달이 없었다면 반대 순서인 where(...).select(...)에서 조건이 사라져 다섯 행이 나왔을 것이다.
+const idAtLeastThreeSelectFirst = from("users").select("id", "name").where("id", ">=", 3).rows();
+console.log(idAtLeastThreeSelectFirst);
+
+// 연산자 자체는 number 컬럼 id에 허용되는 ">"이지만, 값 자리에는 number가 와야 한다.
+// 따라서 문자열 "3"은 연산자가 아니라 세 번째 인자인 값 자리에서 막힌다.
+// @ts-expect-error - error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+from("users").where("id", ">", "3");
+
+// string 컬럼 name에는 같은지와 다른지만 뜻이 있으므로 "!="는 허용되고 실제로 민준 한 행을 제외한다.
+// number, string, boolean이라는 서로 다른 세 컬럼 타입에도 ColumnOperators의 같은 규칙이 일관되게 적용된다.
+const namesExceptMinjun = from("users").where("name", "!=", "민준").select("name").rows();
+console.log(namesExceptMinjun);
+
+// string 컬럼은 boolean 컬럼과 같은 이유로 크기 비교를 허용하지 않아 두 번째 인자에서 막힌다.
+// @ts-expect-error - error TS2345: Argument of type '">"' is not assignable to parameter of type '"!=" | "="'.
+from("users").where("name", ">", "민준");
+
+// boolean 컬럼 isActive에는 "="가 허용되고 true인 세 행만 남는다. 앞에서 확인한 금지된 ">"와
+// 이 허용 호출을 함께 보면 string과 boolean에는 "="와 "!="만 허용된다는 규칙이 동일하게 작동한다.
+const activeUserRows = from("users").where("isActive", "=", true).select("id", "name").rows();
+console.log(activeUserRows);
+
+// filters에 조건이 둘 이상 쌓이면 every가 AND로 결합한다. 따라서 isActive가 true이면서
+// id가 3보다 큰 행만 남아 id 5와 4인 두 행이 반환된다.
+const activeUsersAfterIdThree = from("users")
+  .where("isActive", "=", true)
+  .where("id", ">", 3)
+  .select("id", "name")
+  .rows();
+console.log(activeUsersAfterIdThree);
 
 export {};
