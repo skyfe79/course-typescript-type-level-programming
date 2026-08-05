@@ -1,6 +1,6 @@
 // AST를 따라가며 식·문·함수 선언을 사람이 읽을 수 있는 자바스크립트 텍스트로 바꾼다.
 
-import type { Block, Expr, FuncDecl, IfStatement, Statement } from "./ast.ts";
+import type { Block, Expr, FuncDecl, IfStatement, Program, Statement } from "./ast.ts";
 
 // 런타임 프렐류드는 생성된 코드의 바깥에서 이 네 이름으로 제공된다. as const를
 // 붙여 각 원소를 넓은 string이 아니라 정확한 문자열 리터럴 타입으로 보존한다.
@@ -155,4 +155,24 @@ export function emitFunction(func: FuncDecl, level: number = 0): string {
   // 자바스크립트 함수에는 두 타입 어노테이션을 남기지 않고, 사용자 이름만 같은
   // mangle 규칙으로 바꾼다. 본문은 Block이므로 문에서 쓰던 emitter를 그대로 쓴다.
   return `${currentIndent}function ${mangle(func.name)}(${params}) ${emitBlock(func.body, level)}`;
+}
+
+export function emitProgram(program: Program): string {
+  // 코드 생성 시점에는 어떤 내장 함수가 실제로 쓰였는지 따로 추적하지 않는다. 언제나
+  // 네 이름을 한꺼번에 가져오면 식 emitter와 프렐류드 사이의 계약이 단순하고 일정하다.
+  // 생성 파일은 ESM으로 실행되므로 require가 아니라 import를 쓰며, Node의 ESM 해석은
+  // 상대 경로의 확장자를 자동으로 보충하지 않으므로 지정자에 .js까지 반드시 적는다.
+  // 이 import가 가리키는 prelude.js는 아직 없고, 다음 화에서 런타임 구현으로 추가한다.
+  const prelude = 'import { print, input, toNumber, random } from "./prelude.js";';
+
+  // 함수 선언끼리는 빈 줄 하나를 두되, 함수가 하나도 없으면 빈 문자열을 만든다.
+  // 최상위 문은 소스의 순서를 유지하며 모두 level 0에서 변환한다.
+  const functions = program.functions.map((func) => emitFunction(func, 0)).join("\n\n");
+  const statements = program.statements.map((statement) => emitStatement(statement, 0)).join("\n");
+
+  // 비어 있는 구역을 먼저 제거해야 함수나 문이 없는 프로그램에 불필요한 빈 줄이
+  // 생기지 않는다. 남은 구역 사이는 빈 줄 하나로 나누고, 파일 마지막에는 정확히
+  // 한 번의 줄바꿈을 붙여 디스크에 저장했을 때 마지막 줄이 잘리지 않게 한다.
+  const sections = [prelude, functions, statements].filter((section) => section.length > 0);
+  return `${sections.join("\n\n")}\n`;
 }
