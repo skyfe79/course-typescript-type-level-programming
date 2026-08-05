@@ -103,4 +103,17 @@ type WidenedRow = MapT<typeof row, WidenF>;
 const widenedProof: WidenedRow = [42, "another string", false];
 const widenedExact: [number, string, boolean] = widenedProof;
 
+// 이번 화의 두 번째 변환은 각 원소를 자기 타입의 배열로 감싼다.
+// MapT의 재귀 정의를 이번에도 손대지 않았다. 바뀌는 것은 F 자리에 들어가는 규칙뿐이다.
+interface ArrayWrapF extends TypeFn {
+  readonly out: (this["arg"])[];
+}
+
+type ArrayRow = MapT<typeof row, ArrayWrapF>;
+
+// 배열 안에서는 각 원소의 리터럴 타입이 그대로 유지된다.
+// 바깥 튜플은 MapT의 누산기가 [...Acc, ...]로 새로 만들어지므로 readonly가 아니다.
+const arrayProof: ArrayRow = [[1, 1], ["two"], [true, true]];
+const arrayExact: [1[], "two"[], true[]] = arrayProof;
+
 export {};
