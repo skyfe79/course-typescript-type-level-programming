@@ -70,6 +70,51 @@ const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
 const OUT_DIR = new URL("./out/", import.meta.url);
 
+// codeStep 440 — 컨볼루션 커널의 전체 길이는 중심이 하나뿐인 홀수 정사각형이어야 한다.
+// 이번 프로젝트에서 다룰 최대 한 변은 7이므로, 허용되는 전체 길이를 닫힌 유니온으로 적는다.
+type OddSquareLength = 1 | 9 | 25 | 49;
+
+// 조건을 통과한 커널 값은 가중치 튜플과 한 변의 길이, 정규화에 쓸 나눗수를 함께 보관한다.
+// 가중치를 미리 나눈 number[]로 만들지 않고 정수 리터럴 튜플로 남겨야 길이 검사가 유지된다.
+interface KernelShape<W extends readonly number[]> {
+  readonly weights: W;
+  readonly side: number;
+  /** 가중치 합으로 나눈다. 박스는 3×3이면 9·5×5면 25, 가우시안은 16, 샤픈은 1이다. */
+  readonly divisor: number;
+}
+
+// 잘못된 길이를 never로 지우지 않고 이름 있는 인터페이스로 전달한다.
+// 호버에는 오류 이름과 Actual 타입 인자가 그대로 남아 무엇이 잘못됐는지 읽을 수 있다.
+interface KernelLengthMismatch<Actual extends number> {
+  readonly error: "KERNEL_LENGTH_NOT_ODD_SQUARE";
+  readonly allowed: OddSquareLength;
+  readonly actualLength: Actual;
+}
+
+type Kernel<W extends readonly number[]> =
+  W["length"] extends OddSquareLength
+    ? KernelShape<W>
+    : KernelLengthMismatch<W["length"] & number>;
+
+// 3×3의 아홉 가중치는 허용 유니온의 9에 해당하므로 정상 커널 모양을 만족한다.
+const boxKernel3x3: Kernel<readonly [1, 1, 1, 1, 1, 1, 1, 1, 1]> = {
+  weights: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  side: 3,
+  divisor: 9,
+};
+
+// 잘못된 예제는 호출하지 않는 함수에 두어 런타임 출력은 늘리지 않고 타입 검사 증거만 남긴다.
+function brokenKernelDemo(): void {
+  const brokenKernel: Kernel<readonly [1, 2, 3, 4, 5, 6, 7, 8]> = {
+    // @ts-expect-error — TS2353: 길이 8은 KernelLengthMismatch<8>이므로 weights 필드가 없다.
+    weights: [1, 2, 3, 4, 5, 6, 7, 8],
+    side: 3,
+    divisor: 8,
+  };
+
+  void brokenKernel;
+}
+
 // codeStep 428 — 파이프라인의 각 단계를 함수가 아니라 평범한 데이터로 표현한다.
 // 함수로만 보관하면 실제로 호출해 보기 전에는 무슨 작업인지 알 수 없어서,
 // 목록 출력·재정렬·사전 검사를 실제 이미지 처리와 분리하기 어렵다.
@@ -628,6 +673,13 @@ function main(): void {
   saveImage("threshold", thresholdStage(128).run(decodedImage));
   saveImage("saturate-0", saturateStage(0).run(decodedImage));
   saveImage("saturate-1.8", saturateStage(1.8).run(decodedImage));
+
+  // codeStep 440 — 리터럴 튜플의 길이 9가 3×3 커널의 런타임 값에도 그대로 대응한다.
+  console.log(
+    `커널 3x3 길이=${boxKernel3x3.weights.length} side=${boxKernel3x3.side} ` +
+      `divisor=${boxKernel3x3.divisor}`,
+  );
+
 }
 
 main();
