@@ -80,4 +80,19 @@ const connectReturnsConnected: Eq<typeof connected, ConnectedConnection> = true;
 // 타입에서 확인한 전이는 실행 결과로도 그대로 이어진다.
 connected.send("hi");
 
+// codeStep 394 — connect() 없이 send() 호출해 컴파일 에러 확인하기
+
+// 순서를 어긴 호출과 순서를 지킨 호출을 나란히 두고, 앞의 것만 막히는지 확인한다.
+function trySendBeforeConnect(): void {
+  // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
+  // @ts-expect-error - 연결 전 상태인 DisconnectedConnection에는 send 메서드가 없다
+  connection.send("hi");
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/connection-api.ts(88,14): error TS2339: Property 'send' does not exist on type 'DisconnectedConnection'.
+}
+
+// 도입에서 본 런타임 크래시는 이제 프로그램이 실행되기도 전에 타입 오류로 사라진다.
+// 반면 connect()를 먼저 거친 호출은 그대로 통과하므로, 정상적인 사용까지 막히지는 않는다.
+connection.connect().send("connect() 다음이라 통과합니다");
+
 export {};
