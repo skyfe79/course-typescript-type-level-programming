@@ -32,6 +32,23 @@ class Program<A, E extends EffectName> {
   ): Program<A, "readFile" | "writeLog" | "fetchUrl"> {
     return new Program(effects, thunk);
   }
+
+  // codeStep 410 — 핸들러를 하나만 빼고 붙이기
+
+  // K는 현재 E에 남아 있는 이름만 받을 수 있고, 반환 타입에서는 그 이름 하나를 제거한다.
+  handle<K extends E>(
+    name: K,
+    handler: () => void,
+  ): Program<A, Exclude<E, K>> {
+    // 이 예제가 보려는 것은 이름이 타입에서 지워지는 과정뿐이라, handler 본문은 실행하지 않는다.
+    // 처리한 이름을 런타임 목록에서 빼고, 같은 사실을 Exclude<E, K>로 타입에도 반영한다.
+    const remainingEffects = this.effects.filter((effect) => effect !== name);
+
+    return new Program(remainingEffects, this.thunk) as Program<
+      A,
+      Exclude<E, K>
+    >;
+  }
 }
 
 // 두 타입이 정확히 같은지 판별한다. true를 상수에 대입하면 타입 주장이 계속 검사된다.
@@ -50,5 +67,15 @@ const reportCarriesEveryEffect: Eq<
 
 // 타입은 실행 전에 지워지므로, Eq 검사를 통과한 프로그램이 여기까지 왔음을 알린다.
 console.log("타입 검사: report에 세 이펙트가 모두 기록되어 있습니다.");
+
+// readFile과 writeLog만 처리하고, fetchUrl은 컴파일 에러를 확인하려고 일부러 남겨 둔다.
+const handled = report
+  .handle("readFile", () => console.log("파일 읽기 처리"))
+  .handle("writeLog", () => console.log("로그 기록 처리"));
+
+const handledKeepsOnlyFetchUrl: Eq<
+  typeof handled,
+  Program<string, "fetchUrl">
+> = true;
 
 export {};
