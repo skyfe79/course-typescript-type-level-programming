@@ -6,5 +6,8 @@
   "description": "PNG 필터 체인 라이브러리 & CLI (§30 프로젝트)입니다.",
   "dependencies": {
     "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/pngjs": "^6.0.5"
   }
 }

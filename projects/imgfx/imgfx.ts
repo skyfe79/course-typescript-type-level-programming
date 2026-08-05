@@ -7,9 +7,9 @@
 // 2. 각 스테이지는 입력 버퍼를 제자리에서 바꾸지 않고 항상 새 버퍼를 반환한다.
 // 3. 파일 입출력은 한 계층에만 두며, 스테이지는 파일 시스템을 전혀 알지 못한다.
 
-// pngjs는 선언 파일 없이 순수 JavaScript로 배포되므로 이번 스텝에서는 모듈 타입 오류를 예고한다.
-// 다음 스텝에서 @types/pngjs를 설치하면 TS2578이 발생해 이 억제 주석을 지우라고 알려 준다.
-// @ts-expect-error — 현재 PNG와 여기서 얻는 width, height, data는 모두 any다.
+// pngjs는 여전히 선언 파일 없이 순수 JavaScript로 배포되며, 타입은 빌드·검사에만 필요한
+// devDependencies의 @types/pngjs가 제공한다. 이제 png.width는 number, png.data는 Buffer로 잡히고,
+// colorType: 6도 0 | 2 | 4 | 6 중 하나로 검사된다.
 import { PNG } from "pngjs";
 import { readFileSync, writeFileSync } from "node:fs";
 
