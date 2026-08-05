@@ -71,12 +71,18 @@ function requiresRgba(image: ImageBuffer<"RGBA8">): void {
 
 const gray: ImageBuffer<"Gray8"> = makeImageBuffer(new Uint8ClampedArray(1), 1, 1);
 
-// 팬텀 필드는 런타임에 존재하지 않으므로 아래 두 호출 모두 실행 중에는 그냥 돌아간다.
-// 실제로 찍히는 bytes= 값이 1과 4로 갈리는 것이 바로 타입이 막으려던 그 어긋남이다.
-// @ts-expect-error — Format이 "Gray8"과 "RGBA8"로 갈려 구조적으로 더 이상 같지 않다
-requiresRgba(gray);
+// codeStep 452 — 두 호출은 원래 모듈 맨 위에서 곧바로 실행됐다. 이번 화에서 이 파일이 CLI가
+// 되면서 그럴 수 없게 됐다: 모듈을 불러오기만 해도 찍히므로 `imgfx.ts apply …`의 출력 앞에
+// 관계없는 두 줄이 섞인다. CLI는 자기 표준 출력을 온전히 가져야 하므로 관찰을 함수로 감싸
+// main()이 부르게 바꾼다. 인자 없이 실행할 때의 출력은 순서까지 그대로다.
+function observePhantomMismatch(): void {
+  // 팬텀 필드는 런타임에 존재하지 않으므로 아래 두 호출 모두 실행 중에는 그냥 돌아간다.
+  // 실제로 찍히는 bytes= 값이 1과 4로 갈리는 것이 바로 타입이 막으려던 그 어긋남이다.
+  // @ts-expect-error — Format이 "Gray8"과 "RGBA8"로 갈려 구조적으로 더 이상 같지 않다
+  requiresRgba(gray);
 
-requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
+  requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
+}
 
 // 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
 const INPUT_URL = new URL("./photo.png", import.meta.url);
@@ -206,6 +212,12 @@ function grayscaleStage(): GrayscaleStage {
 
 // codeStep 435 — 세 생성자도 각자의 커널을 공유 순회에 건네는 실행 함수를 돌려준다.
 function brightnessStage(amount: number): BrightnessStage {
+  // codeStep 452 — CLI가 먼저 검사하더라도 생성자는 CLI 밖의 코드에서도 직접 호출될 수 있다.
+  // 스테이지가 품을 값의 불변식은 가장 안쪽 경계인 생성자도 스스로 지켜야 한다.
+  if (!Number.isFinite(amount)) {
+    throw new Error(`brightness amount는 유한한 숫자여야 합니다: ${amount}`);
+  }
+
   return {
     kind: "brightness",
     amount,
@@ -216,6 +228,12 @@ function brightnessStage(amount: number): BrightnessStage {
 }
 
 function contrastStage(amount: number): ContrastStage {
+  // codeStep 452 — 호출 경로가 CLI인지와 상관없이 잘못된 스테이지가 만들어지지 않게 한다.
+  // 바깥 입력 검사는 친절한 오류를, 생성자 검사는 라이브러리 자체의 불변식을 책임진다.
+  if (!Number.isFinite(amount)) {
+    throw new Error(`contrast amount는 유한한 숫자여야 합니다: ${amount}`);
+  }
+
   return {
     kind: "contrast",
     amount,
@@ -1258,8 +1276,167 @@ function saveImage(name: string, image: ImageBuffer<"RGBA8">): void {
 }
 
 const grayToRgba: PixelKernel<"Gray8", "RGBA8"> = ([v]) => [v, v, v, 255];
+// -----------------------------------------------------------------------------
+// codeStep 452 — 명령줄 플래그를 실행 가능한 스테이지로 바꾸는 CLI 경계
+// -----------------------------------------------------------------------------
+
+// codeStep 452 — 각 플래그는 뒤에서 소비할 인자 수와 스테이지 생성법을 한곳에 묶는다.
+// 테이블을 읽는 쪽은 개별 플래그의 사정을 알 필요 없이 arity만큼 이동하면 된다.
+interface FlagSpec {
+  readonly arity: number;
+  readonly build: (args: readonly string[]) => ExecutableStage;
+}
+
+// codeStep 452 — 명령줄의 숫자는 Number가 NaN이나 Infinity를 돌려줄 수 있으므로,
+// 스테이지를 만들기 전에 어느 플래그의 어느 원문 값이 잘못됐는지 경계에서 밝혀 준다.
+function parseNumericArg(raw: string, flag: string): number {
+  const value = Number(raw);
+
+  if (!Number.isFinite(value)) {
+    throw new Error(`${flag}의 값은 유한한 숫자여야 합니다: ${raw}`);
+  }
+
+  return value;
+}
+
+// codeStep 452 — 사람이 짧게 쓰는 h와 v도 받아 내부의 닫힌 Direction 유니온으로 바꾼다.
+function parseDirection(raw: string): Direction {
+  if (raw === "horizontal" || raw === "h") {
+    return "horizontal";
+  }
+  if (raw === "vertical" || raw === "v") {
+    return "vertical";
+  }
+
+  throw new Error(`flip 방향은 horizontal, vertical, h, v 중 하나여야 합니다: ${raw}`);
+}
+
+// codeStep 452 — rotateStage는 Rotation 유니온만 받으므로 코드 안의 잘못된 각도는 타입이 막는다.
+// 하지만 명령줄에서 들어온 값은 그냥 string이라 그 보호가 끝난다. 이 경계에서 사람이 다시
+// 검사하고 좁혀야만 런타임 문자열도 타입이 약속한 "90" | "180" | "270"이 된다.
+function parseRotation(raw: string): Rotation {
+  if (raw === "90" || raw === "180" || raw === "270") {
+    return raw;
+  }
+
+  throw new Error(`회전 각도는 90, 180, 270 중 하나여야 합니다: ${raw}`);
+}
+
+// codeStep 452 — as const로 키와 arity 리터럴을 보존하고, satisfies로 모든 항목이
+// FlagSpec 모양인지 검사한다. 둘을 함께 써야 "얼리기"와 "모양 검사"를 모두 얻는다.
+const FLAG_SPEC = {
+  "--invert": {
+    arity: 0,
+    build: () => invertStage(),
+  },
+  "--grayscale": {
+    arity: 0,
+    build: () => grayscaleStage(),
+  },
+  "--brightness": {
+    arity: 1,
+    build: (args) => brightnessStage(parseNumericArg(args[0], "--brightness")),
+  },
+  "--contrast": {
+    arity: 1,
+    build: (args) => contrastStage(parseNumericArg(args[0], "--contrast")),
+  },
+  "--threshold": {
+    arity: 1,
+    build: (args) => thresholdStage(parseNumericArg(args[0], "--threshold")),
+  },
+  "--saturate": {
+    arity: 1,
+    build: (args) => saturateStage(parseNumericArg(args[0], "--saturate")),
+  },
+  "--blur": {
+    arity: 1,
+    build: (args) => boxBlurStage(parseNumericArg(args[0], "--blur")),
+  },
+  "--gaussian": {
+    arity: 0,
+    build: () => gaussianBlurStage(),
+  },
+  "--sharpen": {
+    arity: 0,
+    build: () => sharpenStage(),
+  },
+  "--flip": {
+    arity: 1,
+    build: (args) => flipStage(parseDirection(args[0])),
+  },
+  "--rotate": {
+    arity: 1,
+    build: (args) => rotateStage(parseRotation(args[0])),
+  },
+} as const satisfies Record<string, FlagSpec>;
+
+// codeStep 452 — 런타임 문자열이 실제 테이블 키인지 확인한 사실을 타입 검사기에도 전달한다.
+function isKnownFlag(flag: string): flag is keyof typeof FLAG_SPEC {
+  // Object.prototype에서 물려받은 이름까지 플래그로 오해하지 않도록 자체 키만 검사한다.
+  return Object.hasOwn(FLAG_SPEC, flag);
+}
+
+// codeStep 452 — 스펙의 arity만큼 인자를 소비하고 같은 순서로 스테이지를 쌓는다.
+// 지금은 오류를 잡거나 process.exit를 부르지 않는다. codeStep 454에서 위치를 담은 사람이 읽기
+// 좋은 메시지와 종료 코드로 바꿀 예정이므로, 이번 단계에서는 잡히지 않은 예외가 정상이다.
+function parseFlags(argv: readonly string[]): ExecutableStage[] {
+  const stages: ExecutableStage[] = [];
+  let index = 0;
+
+  while (index < argv.length) {
+    const flag = argv[index];
+    if (!isKnownFlag(flag)) {
+      throw new Error(`알 수 없는 플래그: ${flag}`);
+    }
+
+    const spec = FLAG_SPEC[flag];
+    const args = argv.slice(index + 1, index + 1 + spec.arity);
+    if (args.length < spec.arity) {
+      throw new Error(`${flag}는 인자 ${spec.arity}개가 필요합니다`);
+    }
+
+    stages.push(spec.build(args));
+    index += 1 + spec.arity;
+  }
+
+  return stages;
+}
+
+// codeStep 452 — 문법 오류가 어느 경로에서 나도 같은 한 줄 사용법을 보여 준다.
+const CLI_USAGE = "사용법: imgfx apply <입력파일> [스테이지 플래그…]";
+
+// codeStep 452 — 이번 단계는 apply 문법과 계획만 확인한다. 실제 파일 실행은 아직 연결하지 않는다.
+function runCli(argv: readonly string[]): void {
+  const command = argv[0];
+  if (command !== "apply") {
+    throw new Error(`지원하지 않는 명령: ${command ?? "(없음)"}\n${CLI_USAGE}`);
+  }
+
+  const inputPath = argv[1];
+  if (inputPath === undefined) {
+    throw new Error(`입력 파일이 필요합니다\n${CLI_USAGE}`);
+  }
+
+  const stages = parseFlags(argv.slice(2));
+  console.log(`CLI 입력 ${inputPath} / 스테이지 ${stages.length}개`);
+  console.log(`CLI 계획 ${planPipeline(stages).join(" / ")}`);
+  // codeStep 452 — JSON.stringify는 run 함수 프로퍼티를 생략한다. 지금 JSON에는 실행 함수가 없으며,
+  // 이 손실이 codeStep 453에서 체인 파일의 데이터 표현을 설계할 출발점이다.
+  console.log(`CLI JSON ${JSON.stringify(stages)}`);
+}
 
 function main(): void {
+  // codeStep 452 — 인자가 있으면 CLI로 가고, 없으면 지금까지의 관찰 출력을 그대로 낸다.
+  const argv = process.argv.slice(2);
+  if (argv.length > 0) {
+    runCli(argv);
+    return;
+  }
+
+  // 모듈 맨 위에 있던 팬텀 관찰을 이 자리에서 부른다 — 출력 순서는 예전과 같다.
+  observePhantomMismatch();
+
   // 직렬화 결과에는 data·width·height만 있고 타입 전용 팬텀 필드 __format은 어디에도 없다.
   console.log(JSON.stringify(rgba));
   console.log(`bytesPerPixel RGBA8=${rgbaSize} Gray8=${graySize}`);
