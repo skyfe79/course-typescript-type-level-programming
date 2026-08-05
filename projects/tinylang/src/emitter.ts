@@ -1,6 +1,6 @@
-// 식 AST를 따라가며 각 노드를 사람이 읽을 수 있는 자바스크립트 텍스트로 바꾼다.
+// AST를 따라가며 식·문·함수 선언을 사람이 읽을 수 있는 자바스크립트 텍스트로 바꾼다.
 
-import type { Expr } from "./ast.ts";
+import type { Block, Expr, FuncDecl, IfStatement, Statement } from "./ast.ts";
 
 // 런타임 프렐류드는 생성된 코드의 바깥에서 이 네 이름으로 제공된다. as const를
 // 붙여 각 원소를 넓은 string이 아니라 정확한 문자열 리터럴 타입으로 보존한다.
@@ -65,4 +65,94 @@ export function emitExpr(expr: Expr): string {
       throw new Error(`처리하지 않은 식 종류입니다: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+// 문과 함수 선언이 반환하는 텍스트는 첫 줄을 포함한 모든 줄을 level만큼
+// 들여쓴다. 한 단계는 공백 두 칸이다. 블록 자체는 `{` 앞의 들여쓰기를 붙이지
+// 않고, 자식 문은 level + 1, 닫는 `}`는 level로 들여쓴다. 여는 중괄호가 놓일
+// 자리의 들여쓰기는 블록을 출력하는 헤더나 독립 블록 문이 맡는다.
+const INDENT = "  ";
+
+function indent(level: number): string {
+  return INDENT.repeat(level);
+}
+
+function emitIfWithoutIndent(stmt: IfStatement, level: number): string {
+  // 바깥 들여쓰기는 이 if를 문으로 출력하는 쪽에서 한 번만 붙인다. 재귀 호출도
+  // 들여쓰기 없는 `if`로 시작하므로 else if 사슬을 그대로 이어 붙일 수 있다.
+  let emitted = `if (${emitExpr(stmt.condition)}) ${emitBlock(stmt.thenBranch, level)}`;
+
+  if (stmt.elseBranch === null) return emitted;
+
+  if (stmt.elseBranch.kind === "block") {
+    return `${emitted} else ${emitBlock(stmt.elseBranch, level)}`;
+  }
+
+  emitted += ` else ${emitIfWithoutIndent(stmt.elseBranch, level)}`;
+  return emitted;
+}
+
+export function emitStatement(stmt: Statement, level: number = 0): string {
+  const currentIndent = indent(level);
+
+  switch (stmt.kind) {
+    case "block":
+      // 독립 블록 문은 헤더가 없으므로 문 emitter가 여는 중괄호 앞의 들여쓰기를
+      // 붙인다. 블록 안의 자식과 닫는 중괄호는 emitBlock의 규약을 따른다.
+      return `${currentIndent}${emitBlock(stmt, level)}`;
+
+    case "if":
+      // 헬퍼는 if 한 덩어리를 들여쓰기 없이 만들고, 문 emitter가 규약에 맞춰
+      // 첫 줄의 들여쓰기를 붙인다. else if도 헬퍼 안에서 같은 형태로 재귀한다.
+      return `${currentIndent}${emitIfWithoutIndent(stmt, level)}`;
+
+    case "varDecl":
+      // declaredType은 타입 검사에만 필요하다. 자바스크립트에는 타입 어노테이션을
+      // 남길 자리가 없으므로 이름과 초기화식만 let 선언으로 내보낸다.
+      return `${currentIndent}let ${mangle(stmt.name)} = ${emitExpr(stmt.initializer)};`;
+
+    case "assignment":
+      return `${currentIndent}${mangle(stmt.name)} = ${emitExpr(stmt.value)};`;
+
+    case "while":
+      return `${currentIndent}while (${emitExpr(stmt.condition)}) ${emitBlock(stmt.body, level)}`;
+
+    case "return":
+      return `${currentIndent}return ${emitExpr(stmt.value)};`;
+
+    case "exprStatement":
+      // 호출도 식이므로 문 자리에서는 다른 식과 마찬가지로 세미콜론만 붙인다.
+      return `${currentIndent}${emitExpr(stmt.expression)};`;
+
+    default: {
+      // Statement에 새 갈래가 추가되었는데 위 case를 빠뜨리면 never 대입이
+      // 컴파일 오류를 만든다. 타입 밖의 값이 들어오는 실행 경계도 throw로 막는다.
+      const exhaustive: never = stmt;
+      throw new Error(`처리하지 않은 문 종류입니다: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+export function emitBlock(block: Block, level: number = 0): string {
+  const currentIndent = indent(level);
+  const statements = block.statements.map((statement) => emitStatement(statement, level + 1));
+
+  // 빈 블록도 여는 줄과 닫는 줄을 따로 두어, 문이 생겼을 때 출력 모양이
+  // 갑자기 달라지지 않게 한다. `{`의 들여쓰기는 호출자가 붙이고, 자식은 이미
+  // 자기 첫 줄까지 들여쓴 문자열이며 닫는 중괄호만 현재 level로 맞춘다.
+  return [
+    "{",
+    ...statements,
+    `${currentIndent}}`,
+  ].join("\n");
+}
+
+export function emitFunction(func: FuncDecl, level: number = 0): string {
+  const currentIndent = indent(level);
+  const params = func.params.map((param) => mangle(param.name)).join(", ");
+
+  // 매개변수의 typeAnnotation과 함수의 returnType은 검사 단계에서 역할을 마쳤다.
+  // 자바스크립트 함수에는 두 타입 어노테이션을 남기지 않고, 사용자 이름만 같은
+  // mangle 규칙으로 바꾼다. 본문은 Block이므로 문에서 쓰던 emitter를 그대로 쓴다.
+  return `${currentIndent}function ${mangle(func.name)}(${params}) ${emitBlock(func.body, level)}`;
 }
