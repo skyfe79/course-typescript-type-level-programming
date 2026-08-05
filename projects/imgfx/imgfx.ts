@@ -683,6 +683,53 @@ type Direction = "horizontal" | "vertical";
 // 별도 유니온으로 두어 remapCoord의 "같은 크기 안에서 재배치한다"는 계약을 그대로 지킨다.
 type Rotation = "90" | "180" | "270";
 
+// codeStep 449 — 회전도 실행기가 받을 수 있도록 포맷 관점의 스테이지로 편입한다.
+interface RotateStage extends PixelStage<"rotate", "RGBA8", "RGBA8"> {
+  readonly rotation: Rotation;
+}
+
+// AnyStage와 AnyStageWithFlip은 이전 화의 소진 검사 스냅샷이므로 그대로 두고,
+// 회전까지 실행할 새 유니온을 별도로 만든다.
+type ExecutableStage = AnyStageWithFlip | RotateStage;
+
+// Stage<Kind, In, Out>은 픽셀 포맷만 표현하고 크기 W·H는 표현하지 못한다. 따라서 유니온에
+// 들어온 회전 결과는 ImageBuffer<"RGBA8">, 즉 W = H = number로 뭉개져 크기 교환 정보가 사라진다.
+// 크기를 타입에 남기려면 rotate90·rotate180·rotate270을 직접 부르고, 실행기 체인에 넣을 때는
+// 그 정보를 포기한다. 정밀한 크기 API와 공통 실행기 API가 함께 존재하는 이유가 이 차이다.
+
+// codeStep 451 — ep_445의 describeStageWithFlip은 AnyStageWithFlip용 소진 검사 스냅샷으로
+// 얼어붙어 있고 유니온도 다르므로 재사용하지 않고, 회전까지 아는 새 설명기를 만든다.
+function describeExecutableStage(stage: ExecutableStage): string {
+  switch (stage.kind) {
+    case "invert":
+      return "반전";
+    case "grayscale":
+      return "그레이스케일";
+    case "brightness":
+      return `밝기 ${stage.amount}`;
+    case "contrast":
+      return `대비 ${stage.amount}`;
+    case "threshold":
+      return `임계값 ${stage.level}`;
+    case "saturate":
+      return `채도 ${stage.factor}`;
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+    case "flip":
+      return `뒤집기 ${stage.direction}`;
+    case "rotate":
+      return `회전 ${stage.rotation}도`;
+  }
+  // runStage와 이 함수는 같은 ExecutableStage 유니온 위에 서 있고 둘 다 default가 없다.
+  // 종류를 하나 더하면 두 함수가 함께 TS2366을 내므로, 설명 목록과 실행 목록이 갈라지지 않게
+  // 하는 것은 개발자의 규율이 아니라 반환 경로를 소진하는 타입 검사다.
+}
+
+// 이미 만들어진 스테이지 데이터만 읽으므로 디코딩·인코딩·픽셀 연산도, 실행 카운터 변경도 없다.
+function planPipeline(stages: readonly ExecutableStage[]): string[] {
+  return stages.map((stage, index) => `${index + 1}. ${describeExecutableStage(stage)}`);
+}
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -852,6 +899,129 @@ function rotate180<W extends number, H extends number>(
   buf: ImageBuffer<"RGBA8", W, H>,
 ): ImageBuffer<"RGBA8", W, H> {
   return makeImageBuffer(rotatePixels(buf, "180"), buf.width, buf.height);
+}
+
+// codeStep 449 — 실행기용 회전은 각도를 데이터로 들고 다니며, 실행할 때도 기존 회전 코어를 쓴다.
+function rotateStage(rotation: Rotation): RotateStage {
+  return {
+    kind: "rotate",
+    rotation,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (source) => {
+      const swapsDimensions = rotation !== "180";
+      return makeImageBuffer(
+        rotatePixels(source, rotation),
+        swapsDimensions ? source.height : source.width,
+        swapsDimensions ? source.width : source.height,
+      );
+    },
+  };
+}
+
+interface StageRun {
+  readonly image: ImageBuffer<PixelFormat>;
+  /** 이웃 픽셀을 읽어 제자리에서 계산할 수 없는 스테이지인가. */
+  readonly readsNeighbors: boolean;
+}
+
+// 스테이지가 run을 들고 있어 어떤 함수를 부를지는 데이터가 이미 정해 두었다. 그래도 kind로
+// 가르는 까닭은 실행 전에 알아야 하는 것이 run 바깥에 있기 때문이다 — 이 스테이지가 이웃을
+// 읽어서 제자리 계산이 불가능한가. 픽셀 단위·이웃 읽기·좌표 재배치라는 세 묶음은 실행 준비가
+// 달라지는 이유를 그대로 드러낸다.
+function runStage(source: ImageBuffer<"RGBA8">, stage: ExecutableStage): StageRun {
+  switch (stage.kind) {
+    // 픽셀 하나만 읽어 픽셀 하나를 쓰는 커널 계열은 자기 자리만 보므로 이웃을 읽지 않는다.
+    case "invert":
+    case "grayscale":
+    case "brightness":
+    case "contrast":
+    case "threshold":
+    case "saturate":
+      return { image: stage.run(source), readsNeighbors: false };
+    // 컨볼루션만 이웃을 읽는다. 그래서 제자리에서 고치면 아직 읽지 않은 이웃이 오염된다
+    // (codeStep 443의 inPlaceCorruptionDemo가 그 오염을 5×1 버퍼로 보여 주었다). 그중 분리
+    // 순회로 도는 박스 블러는 중간값을 반올림하지 않으려고 Float64Array 스크래치까지 두 개 잡고,
+    // 가우시안·샤픈은 일반 순회라 출력 배열 하나만 만든다 — 이 분류는 거기까지 가르지 않는다.
+    case "convolve":
+      return { image: stage.run(source), readsNeighbors: true };
+    // 값은 그대로 두고 자리만 옮기는 좌표 재배치 계열이다.
+    case "flip":
+    case "rotate":
+      return { image: stage.run(source), readsNeighbors: false };
+  }
+  // default를 두지 않은 것이 곧 소진 검사다. StageRun에는 undefined가 없으므로 유니온에 종류를
+  // 더하고 case를 빠뜨리면 반환하지 않는 경로가 생겨 TS2366으로 컴파일이 먼저 깨진다.
+  // default의 never로 검사하는 describeStage와 결과는 같지만, 여기서는 억제 주석 없이 스위치
+  // 자체가 닫혀 있어야 한다. case 하나를 지우고 npx tsc --noEmit을 실행하면 차이를 볼 수 있다.
+  // 반환 이미지를 PixelFormat으로 넓히는 이유는 grayscale만 Gray8을 내놓기 때문이다. 그래서 이
+  // 함수는 다음 스테이지가 그 포맷을 받을 수 있는지까지는 말해 주지 않는다 — 앞뒤를 맞물리게 하는
+  // 일은 목록을 만드는 쪽의 몫으로 남는다.
+}
+
+// codeStep 450 — 코덱 호출을 파이프라인의 바이트 경계 한곳에 모아 PNG는 시작과 끝에서만 만진다.
+// 모든 스테이지가 새 이미지 배열을 반환하므로 실행 중에는 입력과 출력이 함께 있다가, 다음
+// 단계로 넘어가면 앞 버퍼가 쓰레기가 된다. 이웃을 읽는 컨볼루션은 그 위에 중간 버퍼를 더 잡는다
+// (분리 순회로 도는 박스 블러는 Float64Array 스크래치를 가로·세로 두 개).
+// runStage가 돌려준 메타데이터를 세어 그런 스테이지가 체인에 몇 개였는지 실행 결과로 남긴다.
+let decodeCount = 0;
+let encodeCount = 0;
+let neighborStageCount = 0;
+
+function resetPipelineCounts(): void {
+  decodeCount = 0;
+  encodeCount = 0;
+  neighborStageCount = 0;
+}
+
+function runPipeline(pngBytes: Buffer, stages: readonly ExecutableStage[]): Buffer {
+  decodeCount += 1;
+  const decoded = PNG.sync.read(pngBytes);
+  let current: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray(decoded.data),
+    decoded.width,
+    decoded.height,
+  );
+
+  for (const stage of stages) {
+    const result = runStage(current, stage);
+    if (result.readsNeighbors) {
+      neighborStageCount += 1;
+    }
+
+    // ⚠️ 이 실행기는 포맷 인접성을 검사하지 않는다. CheckAdjacent는 튜플로 받는 pipeline()에만
+    // 걸려 있고 여기 stages는 평범한 배열이라, grayscale 뒤에 RGBA8 스테이지를 두어도 컴파일이
+    // 막지 않는다. 그렇게 받은 까닭은 다음 화의 CLI가 명령줄 문자열에서 이 목록을 만들기 때문이다.
+    // 지금은 pipeline·mapPixels와 같은 구현 경계인 이 한 자리에서 RGBA8로 단언하고, 포맷을 언제
+    // 검사할지는 목록을 만드는 쪽의 숙제로 남겨 둔다.
+    current = result.image as ImageBuffer<"RGBA8">;
+  }
+
+  // 회전은 두 축을 맞바꾸므로 원본이 아니라 마지막 버퍼의 크기로 PNG를 만들어야 한다.
+  const png = new PNG({ width: current.width, height: current.height, colorType: 6 });
+  png.data.set(current.data);
+  encodeCount += 1;
+  return PNG.sync.write(png, { colorType: 6 });
+}
+
+// convolve 하나를 빠뜨리면 반환 경로 검사가 실제로 실패한다는 컴파일되는 증거다.
+function runStageMissingConvolve(
+  source: ImageBuffer<"RGBA8">,
+  stage: ExecutableStage,
+  // @ts-expect-error — convolve를 처리하지 않아 값을 반환하지 않는 경로가 남는다 (TS2366)
+): StageRun {
+  switch (stage.kind) {
+    case "invert":
+    case "grayscale":
+    case "brightness":
+    case "contrast":
+    case "threshold":
+    case "saturate":
+      return { image: stage.run(source), readsNeighbors: false };
+    case "flip":
+    case "rotate":
+      return { image: stage.run(source), readsNeighbors: false };
+  }
 }
 
 function sampleEdge(
@@ -1322,6 +1492,58 @@ function main(): void {
       `90도 네 번 ${maxChannelDifference(decodedImage, rotated90FourTimes)} / ` +
       `180도 두 번 ${maxChannelDifference(decodedImage, rotated180Twice)}`,
   );
+
+  // codeStep 449 — 실행기에서는 크기 타입이 number로 넓어지지만, 실제 픽셀과 크기는 직접 호출과 같다.
+  const executorRotation = runStage(decodedImage, rotateStage("90"));
+  const executorRotated = executorRotation.image as ImageBuffer<"RGBA8">;
+  console.log(
+    `실행기 회전 직접 호출과 최대 채널 차이 ` +
+      `${maxChannelDifference(rotatedDecoded, executorRotated)} / ` +
+      `크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${executorRotated.width}x${executorRotated.height}`,
+  );
+
+  // 분류 문자열을 손으로 적지 않고 각 스테이지를 실제로 실행한 결과의 메타데이터를 읽는다.
+  const invertRun = runStage(asymmetricImage, invertStage());
+  const convolveRun = runStage(asymmetricImage, gaussianBlurStage());
+  const flipRun = runStage(asymmetricImage, flipHorizontalStage());
+  console.log(
+    `실행기 이웃 읽기 invert=${invertRun.readsNeighbors} ` +
+      `convolve=${convolveRun.readsNeighbors} flip=${flipRun.readsNeighbors} ` +
+      `rotate=${executorRotation.readsNeighbors}`,
+  );
+
+  // codeStep 450 — 다섯 단계가 파일 시스템을 모른 채 바이트 경계 안에서 한 번씩만 디코딩·인코딩된다.
+  // Gray8은 RGBA8의 1/4 바이트라 colorType 6으로 바로 인코딩할 수 없으므로 이 체인에는 넣지 않는다.
+  const pipelineStages: readonly ExecutableStage[] = [
+    invertStage(),
+    brightnessStage(20),
+    boxBlurStage(3),
+    flipHorizontalStage(),
+    rotateStage("90"),
+  ];
+  resetPipelineCounts();
+  const pipelineBytes = runPipeline(readFileSync(INPUT_URL), pipelineStages);
+  const verifiedPipelinePng = PNG.sync.read(pipelineBytes);
+  console.log(
+    `바이트 파이프라인 디코딩 ${decodeCount} / 인코딩 ${encodeCount} / ` +
+      `스테이지 ${pipelineStages.length} / 이웃 읽기 ${neighborStageCount} / ` +
+      `크기 ${decoded.width}x${decoded.height} -> ` +
+      `${verifiedPipelinePng.width}x${verifiedPipelinePng.height} / ` +
+      `반환 바이트 ${pipelineBytes.length}`,
+  );
+  console.log(
+    `반환 PNG 검증 ${verifiedPipelinePng.width}x${verifiedPipelinePng.height} ` +
+      `bytes=${verifiedPipelinePng.data.length}`,
+  );
+
+  // codeStep 451 — 실행 때 쓴 같은 다섯 스테이지를 계획기에 넘겨 두 경로의 카탈로그를 일치시킨다.
+  resetPipelineCounts();
+  const pipelinePlan = planPipeline(pipelineStages);
+  console.log(`실행 계획 ${pipelinePlan.join(" / ")}`);
+  // runPipeline은 애초에 파일을 쓰지 않고 바이트를 돌려주므로 ls로는 두 경로를 구분할 수 없다.
+  // 계획 호출 뒤에도 코덱 횟수가 0인 것이 디코딩·인코딩을 전혀 하지 않았다는 실행 시점 증거다.
+  console.log(`계획 실행 뒤 디코딩 ${decodeCount} / 인코딩 ${encodeCount}`);
 }
 
 main();
