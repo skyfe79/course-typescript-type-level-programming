@@ -926,6 +926,51 @@ function runStage(source: ImageBuffer<"RGBA8">, stage: ExecutableStage): StageRu
   // 일은 목록을 만드는 쪽의 몫으로 남는다.
 }
 
+// codeStep 450 — 코덱 호출을 파이프라인의 바이트 경계 한곳에 모아 PNG는 시작과 끝에서만 만진다.
+// 모든 스테이지가 새 이미지 배열을 반환하므로 실행 중에는 입력과 출력이 함께 있다가, 다음
+// 단계로 넘어가면 앞 버퍼가 쓰레기가 된다. 이웃을 읽는 컨볼루션은 그 위에 중간 버퍼를 더 잡는다
+// (분리 순회로 도는 박스 블러는 Float64Array 스크래치를 가로·세로 두 개).
+// runStage가 돌려준 메타데이터를 세어 그런 스테이지가 체인에 몇 개였는지 실행 결과로 남긴다.
+let decodeCount = 0;
+let encodeCount = 0;
+let neighborStageCount = 0;
+
+function resetPipelineCounts(): void {
+  decodeCount = 0;
+  encodeCount = 0;
+  neighborStageCount = 0;
+}
+
+function runPipeline(pngBytes: Buffer, stages: readonly ExecutableStage[]): Buffer {
+  decodeCount += 1;
+  const decoded = PNG.sync.read(pngBytes);
+  let current: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray(decoded.data),
+    decoded.width,
+    decoded.height,
+  );
+
+  for (const stage of stages) {
+    const result = runStage(current, stage);
+    if (result.readsNeighbors) {
+      neighborStageCount += 1;
+    }
+
+    // ⚠️ 이 실행기는 포맷 인접성을 검사하지 않는다. CheckAdjacent는 튜플로 받는 pipeline()에만
+    // 걸려 있고 여기 stages는 평범한 배열이라, grayscale 뒤에 RGBA8 스테이지를 두어도 컴파일이
+    // 막지 않는다. 그렇게 받은 까닭은 다음 화의 CLI가 명령줄 문자열에서 이 목록을 만들기 때문이다.
+    // 지금은 pipeline·mapPixels와 같은 구현 경계인 이 한 자리에서 RGBA8로 단언하고, 포맷을 언제
+    // 검사할지는 목록을 만드는 쪽의 숙제로 남겨 둔다.
+    current = result.image as ImageBuffer<"RGBA8">;
+  }
+
+  // 회전은 두 축을 맞바꾸므로 원본이 아니라 마지막 버퍼의 크기로 PNG를 만들어야 한다.
+  const png = new PNG({ width: current.width, height: current.height, colorType: 6 });
+  png.data.set(current.data);
+  encodeCount += 1;
+  return PNG.sync.write(png, { colorType: 6 });
+}
+
 // convolve 하나를 빠뜨리면 반환 경로 검사가 실제로 실패한다는 컴파일되는 증거다.
 function runStageMissingConvolve(
   source: ImageBuffer<"RGBA8">,
@@ -1433,6 +1478,30 @@ function main(): void {
     `실행기 이웃 읽기 invert=${invertRun.readsNeighbors} ` +
       `convolve=${convolveRun.readsNeighbors} flip=${flipRun.readsNeighbors} ` +
       `rotate=${executorRotation.readsNeighbors}`,
+  );
+
+  // codeStep 450 — 다섯 단계가 파일 시스템을 모른 채 바이트 경계 안에서 한 번씩만 디코딩·인코딩된다.
+  // Gray8은 RGBA8의 1/4 바이트라 colorType 6으로 바로 인코딩할 수 없으므로 이 체인에는 넣지 않는다.
+  const pipelineStages: readonly ExecutableStage[] = [
+    invertStage(),
+    brightnessStage(20),
+    boxBlurStage(3),
+    flipHorizontalStage(),
+    rotateStage("90"),
+  ];
+  resetPipelineCounts();
+  const pipelineBytes = runPipeline(readFileSync(INPUT_URL), pipelineStages);
+  const verifiedPipelinePng = PNG.sync.read(pipelineBytes);
+  console.log(
+    `바이트 파이프라인 디코딩 ${decodeCount} / 인코딩 ${encodeCount} / ` +
+      `스테이지 ${pipelineStages.length} / 이웃 읽기 ${neighborStageCount} / ` +
+      `크기 ${decoded.width}x${decoded.height} -> ` +
+      `${verifiedPipelinePng.width}x${verifiedPipelinePng.height} / ` +
+      `반환 바이트 ${pipelineBytes.length}`,
+  );
+  console.log(
+    `반환 PNG 검증 ${verifiedPipelinePng.width}x${verifiedPipelinePng.height} ` +
+      `bytes=${verifiedPipelinePng.data.length}`,
   );
 }
 
