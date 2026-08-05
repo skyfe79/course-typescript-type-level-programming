@@ -69,6 +69,12 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
     return this;
   }
 
+  // column은 Row에 실제로 있는 컬럼 이름만 받아 ColumnRef로 감싼 타입을 돌려준다.
+  // 실행 시점에는 문자열 값을 그대로 반환하고, 브랜드 표시는 타입 레벨에만 남는다.
+  column<K extends keyof Row>(name: K): ColumnRef<Row, K> {
+    return name as ColumnRef<Row, K>;
+  }
+
   // 저장된 테이블을 읽은 뒤 selectedCols에 기록된 컬럼만 새 객체로 옮겨 담는다.
   // select를 호출하지 않아 선택 목록이 비어 있으면 JSON 첫 행의 모든 컬럼을 사용한다.
   rows(): Pick<Row, Selected[number]>[] {
@@ -304,5 +310,31 @@ const activeUsersAfterIdThree = from("users")
   .select("id", "name")
   .rows();
 console.log(activeUsersAfterIdThree);
+
+// codeStep 379 — 컬럼 참조 타입에 브랜드 적용하기
+
+declare const ColumnBrand: unique symbol;
+
+type ColumnRef<Row, K extends keyof Row = keyof Row> = K & { readonly [ColumnBrand]: Row };
+
+// declare const는 타입 선언일 뿐이라 자바스크립트 출력에서는 지워진다.
+// 그래서 erasableSyntaxOnly 설정과 node의 타입 스트리핑을 모두 통과하면서도
+// 타입 검사기에는 ColumnBrand라는 고유한 표시 이름을 남길 수 있다.
+// 인터섹션으로 붙은 [ColumnBrand] 프로퍼티는 런타임에 존재하지 않는다.
+// 값 차원에서는 그냥 문자열이고, 이 표시는 오직 타입 검사기만 본다.
+// 그래서 구조적으로 같은 문자열 "name"이어도 column을 거친 값과 맨 문자열은 다른 타입이 된다.
+// Row가 브랜드 안에 들어 있으므로 어느 테이블의 컬럼인지까지 타입에 기록된다.
+// 이 성질은 뒤 스텝에서 다른 테이블의 참조를 걸러 내는 근거가 된다.
+const nameRef = from("users").column("name");
+// Eq 단언을 두면 호버로 눈으로 확인하는 대신 컴파일러 검사로 ColumnRef의 정확한 결과를 고정할 수 있다.
+const nameRefMatch: Eq<typeof nameRef, ColumnRef<UsersSchema, "name">> = true;
+
+// 이 저장소는 태그 시점마다 npx tsc --noEmit이 0 오류여야 하므로, 일부러 막히는 예제는
+// 바로 아래 지시어로 소비해 오류가 그 한 줄에서 기대된다는 사실을 함께 기록한다.
+// 설명하는 산문에는 지시어 이름을 골뱅이와 함께 적지 않는다. 주석이 골뱅이 ts-expect-error로
+// 시작하면 뒤에 한국어가 붙어 있어도 타입 검사기가 그것을 또 하나의 지시어로 읽어,
+// 아무 오류도 덮지 않은 지시어라며 TS2578을 낸다.
+// @ts-expect-error - error TS2322: Type '"name"' is not assignable to type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+const bareStringRef: ColumnRef<UsersSchema> = "name";
 
 export {};
