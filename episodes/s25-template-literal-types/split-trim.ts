@@ -15,4 +15,17 @@ type Split<S extends string, Delim extends string> =
 // 구분자가 더 없을 때 [S]를 반환해야 남은 문자열이 마지막 토큰으로 보존된다.
 // 여기서 []를 반환하면 마지막 구분자 뒤의 토큰이 결과에서 사라진다.
 
+// codeStep 362 — Split으로 "a,b,c" 나눠 보기
+
+const csv = "a,b,c";
+type Tokens = Split<typeof csv, ",">;
+
+// 런타임의 split도 타입 수준의 Split과 같은 세 개의 토큰을 만든다.
+console.log(csv.split(","));
+
+// Eq는 두 타입이 정확히 같은지를 판별해 편집기의 호버 결과를 컴파일러 검사로도 고정한다.
+type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+const tokensMatch: Eq<Tokens, ["a", "b", "c"]> = true;
+
 export {};
