@@ -3,5 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "PNG 필터 체인 라이브러리 & CLI (§30 프로젝트)입니다."
+  "description": "PNG 필터 체인 라이브러리 & CLI (§30 프로젝트)입니다.",
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
 }
