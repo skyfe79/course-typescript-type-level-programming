@@ -52,6 +52,19 @@ function bytesPerPixel<Format extends PixelFormat>(format: Format): BytesPerPixe
 const rgbaSize = bytesPerPixel("RGBA8"); // 타입은 number가 아니라 리터럴 4다.
 const graySize = bytesPerPixel("Gray8"); // 타입은 number가 아니라 리터럴 1이다.
 
+function requiresRgba(image: ImageBuffer<"RGBA8">): void {
+  console.log(`requiresRgba ${image.width}x${image.height} bytes=${image.data.length}`);
+}
+
+const gray: ImageBuffer<"Gray8"> = makeImageBuffer(new Uint8ClampedArray(1), 1, 1);
+
+// 팬텀 필드는 런타임에 존재하지 않으므로 아래 두 호출 모두 실행 중에는 그냥 돌아간다.
+// 실제로 찍히는 bytes= 값이 1과 4로 갈리는 것이 바로 타입이 막으려던 그 어긋남이다.
+// @ts-expect-error — Format이 "Gray8"과 "RGBA8"로 갈려 구조적으로 더 이상 같지 않다
+requiresRgba(gray);
+
+requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
+
 // 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
 const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
