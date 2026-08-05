@@ -11,7 +11,9 @@ type EffectTag = "fileIO" | "network" | "logging";
 // effects는 팬텀 필드라서 런타임 객체에 넣지 않아도 되지만, 타입에는 Effects를 보존한다.
 interface Effectful<Result, Effects extends EffectTag> {
   readonly effects?: Effects;
-  run(): Result;
+  run(
+    this: [Effects] extends [never] ? Effectful<Result, Effects> : never
+  ): Result;
 }
 
 // 두 타입이 정확히 같은지 판별한다. true를 상수에 대입하면 타입 주장이 계속 검사된다.
@@ -22,7 +24,15 @@ function chain<A, B, EA extends EffectTag, EB extends EffectTag>(
   step: Effectful<A, EA>,
   next: (a: A) => Effectful<B, EB>
 ): Effectful<B, EA | EB> {
-  return { run: () => next(step.run()).run() };
+  return {
+    run: () => {
+      // 합성기 내부에서는 아직 이펙트가 남은 프로그램을 실제로 실행해야 한다.
+      // 바깥 API(run의 this 제약)는 그대로 두고, 이 자리에서만 실행 가능한 형태로 좁혀 본다.
+      const first = step as Effectful<A, never>;
+      const second = next(first.run()) as Effectful<B, never>;
+      return second.run();
+    },
+  };
 }
 
 // 세 함수는 합성할 파이프라인의 재료다.
@@ -87,5 +97,26 @@ const originalPipelineStillCarriesEveryEffect: Eq<
 // 여기서는 그 검사를 통과했다는 사실을 메시지로만 알린다.
 console.log("타입 검사: afterLogging에는 fileIO와 network만 남아 있습니다.");
 console.log("타입 검사: 원본 pipeline에는 세 이펙트가 모두 남아 있습니다.");
+
+// codeStep 408 — run()이 남은 이펙트를 거부하게 만들기
+
+// Effects를 튜플로 감싼 조건부 타입은 유니온의 각 태그로 조건이 분산되는 것을 막는다.
+// 따라서 Effects 전체가 never일 때만 run의 this가 호출 가능한 Effectful 타입이 된다.
+// pipeline.run(); // 컴파일 에러 — fileIO, network, logging 이펙트가 아직 남아 있다.
+
+// 한 번의 discharge는 한 태그만 지운다. 세 태그를 차례로 처리하고 나면
+// Effects가 never가 되어, 외부에서도 run을 안전하게 호출할 수 있는 프로그램이 된다.
+const handled = discharge(
+  discharge(discharge(pipeline, "fileIO"), "network"),
+  "logging"
+);
+const handledHasNoRemainingEffects: Eq<
+  typeof handled,
+  Effectful<void, never>
+> = true;
+
+// handled는 pipeline과 같은 런타임 프로그램이므로, 실제 실행 결과도 앞 화의 파이프라인과 같다.
+console.log("모든 이펙트를 처리한 pipeline 실행:");
+handled.run();
 
 export {};
