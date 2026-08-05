@@ -4,7 +4,10 @@
   "description": "타입 설계(Part 1)와 타입 레벨 프로그래밍(Part 2) 강좌의 실습 코드가 들어 있습니다.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "typecheck:default": "tsc -p episodes/s29-diagnostics --extendedDiagnostics",
+    "typecheck:parallel": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 8",
+    "typecheck:single": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 1"
   },
   "repository": {
     "type": "git",

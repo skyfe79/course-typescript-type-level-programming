@@ -168,3 +168,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# 강의 실습 산출물 (§11 진단 — ep_187 --generateTrace 출력)
+episodes/s29-diagnostics/trace/
