@@ -72,6 +72,8 @@ type HasExactBinaryOperators =
       ? true
       : false
     : false;
+// 완전성을 지키는 방법은 자리에 따라 다르다. 연산자 분류는 이 타입 수준 대입으로 두 집합이
+// 같은지 확인하고, 노드 순회는 switch의 default에서 never 대입으로 갈래를 소진한다.
 const binaryOperatorClassificationIsComplete: HasExactBinaryOperators = true;
 
 function checkUnary(operator: UnaryOperator, operand: CheckResult): CheckResult {
@@ -230,6 +232,15 @@ export function checkExpr(expr: Expr, scope: Scope, ctx: CheckContext): CheckRes
       if (diagnostics.length > 0) return { ok: false, diagnostics };
       return { ok: true, type: signature.returnType };
     }
+
+    default: {
+      // 위에서 모든 kind를 처리했다면 여기 도달한 값의 타입은 never다. 나중에 노드 종류가
+      // 하나 늘고 그 case를 빠뜨리면 늘어난 갈래가 never에 대입되지 않아 컴파일 오류가 난다.
+      // 외부 JSON처럼 타입 단언을 거친 값이 흘러오면 실행 중에도 이 throw가 그 자리에서
+      // 멈춰 세우므로, 타입 검사 뒤에 남은 죽은 코드가 아니라 런타임 경계의 방어이기도 하다.
+      const exhaustive: never = expr;
+      throw new Error(`처리하지 않은 식 종류입니다: ${JSON.stringify(exhaustive)}`);
+    }
   }
 }
 
@@ -353,6 +364,15 @@ export function checkStatement(
 
       // 문 자리에서는 값이 필요 없으므로 성공 여부만 확인하고 계산된 타입은 버린다.
       return [];
+    }
+
+    default: {
+      // 위에서 모든 kind를 처리했다면 여기 도달한 값의 타입은 never다. 나중에 노드 종류가
+      // 하나 늘고 그 case를 빠뜨리면 늘어난 갈래가 never에 대입되지 않아 컴파일 오류가 난다.
+      // 외부 JSON처럼 타입 단언을 거친 값이 흘러오면 실행 중에도 이 throw가 그 자리에서
+      // 멈춰 세우므로, 타입 검사 뒤에 남은 죽은 코드가 아니라 런타임 경계의 방어이기도 하다.
+      const exhaustive: never = stmt;
+      throw new Error(`처리하지 않은 문 종류입니다: ${JSON.stringify(exhaustive)}`);
     }
   }
 }
