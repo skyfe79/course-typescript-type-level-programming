@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["type-tests-regression.ts"],
+  // 루트 설정은 이 실패 예제를 제외하므로, 전용 검사에서는 상속한 exclude를 비운다.
+  "exclude": []
+}
