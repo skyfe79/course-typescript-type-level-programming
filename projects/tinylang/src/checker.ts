@@ -12,15 +12,38 @@ import type {
 } from "./ast.ts";
 import { makeDiagnostic, toLine, toOffset } from "./diagnostics.ts";
 import type { Diagnostic } from "./diagnostics.ts";
+// 이름 목록의 정본은 emitter.ts의 BUILTIN_NAMES다. 타입만 가져오면 실행 시점의
+// 의존은 생기지 않으면서, 표가 그 목록과 정확히 같은 키를 갖도록 강제할 수 있다.
+import type { BuiltinName } from "./emitter.ts";
 import { createScope, declare, lookup } from "./scope.ts";
 import type { Scope } from "./scope.ts";
+
+// 값을 돌려주지 않는 호출도 식의 자리에 나타날 수 있으므로, 식이 가질 수 있는 타입에
+// "void"를 더한다. 변수 선언·조건·연산자 검사는 이미 타입이 다르면 거절하므로,
+// print(...)의 결과를 값처럼 쓴 자리는 별도 규칙을 더하지 않아도 기존 메시지로 잡힌다.
+export type ExprType = TypeName | "void";
 
 // TypeName | null만 돌려주면 null이 된 이유와 여러 진단을 따로 운반해야 한다.
 // 판별 유니온은 ok를 확인한 갈래에서만 type 또는 diagnostics를 읽게 하므로,
 // 호출자가 실패를 잊고 타입 계산을 계속하는 일도 컴파일 단계에서 막는다.
 export type CheckResult =
-  | { readonly ok: true; readonly type: TypeName }
+  | { readonly ok: true; readonly type: ExprType }
   | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
+
+// "any"는 number·string·boolean 가운데 어느 타입이든 받을 수 있다는 뜻이고,
+// 값이 없는 void까지 인자로 쓸 수 있다는 뜻은 아니다.
+export type BuiltinParamType = TypeName | "any";
+export type BuiltinSignature = {
+  readonly params: readonly BuiltinParamType[];
+  readonly returnType: ExprType;
+};
+
+export const BUILTIN_SIGNATURES: Readonly<Record<BuiltinName, BuiltinSignature>> = {
+  print: { params: ["any"], returnType: "void" },
+  input: { params: ["string"], returnType: "string" },
+  toNumber: { params: ["string"], returnType: "number" },
+  random: { params: ["number"], returnType: "number" },
+};
 
 export type FunctionSignature = {
   readonly params: readonly Param[];
@@ -75,6 +98,12 @@ type HasExactBinaryOperators =
 // 완전성을 지키는 방법은 자리에 따라 다르다. 연산자 분류는 이 타입 수준 대입으로 두 집합이
 // 같은지 확인하고, 노드 순회는 switch의 default에서 never 대입으로 갈래를 소진한다.
 const binaryOperatorClassificationIsComplete: HasExactBinaryOperators = true;
+
+// 문자열 전체를 BuiltinName으로 단언하지 않고 실제 표의 소유 키인지 확인한다.
+// Record의 키 검사는 위의 정본 타입과 연결되어 있어 표와 판별 결과가 함께 움직인다.
+function isBuiltinName(name: string): name is BuiltinName {
+  return Object.hasOwn(BUILTIN_SIGNATURES, name);
+}
 
 function checkUnary(operator: UnaryOperator, operand: CheckResult): CheckResult {
   // 자식의 실제 오류가 있으면 연산자 규칙을 적용할 타입 자체가 없다. 이때는 새
@@ -137,6 +166,16 @@ function checkBinary(
     case "<=":
     case ">":
     case ">=":
+      // 같은 타입인지만 보면 void끼리의 비교도 통과한다. 값이 없는 호출은 비교할
+      // 대상 자체가 없으므로, 두 타입의 일치 여부를 보기 전에 따로 거절한다.
+      if (left.type === "void" || right.type === "void") {
+        return {
+          ok: false,
+          diagnostics: [typeError(
+            `비교 연산자 '${operator}'에는 void 타입을 사용할 수 없습니다 (현재 ${left.type}, ${right.type})`,
+          )],
+        };
+      }
       if (left.type === right.type) {
         return { ok: true, type: "boolean" };
       }
@@ -192,6 +231,46 @@ export function checkExpr(expr: Expr, scope: Scope, ctx: CheckContext): CheckRes
     }
 
     case "call": {
+      // 코드 생성기도 프렐류드 이름을 사용자 함수보다 먼저 판별한다. 검사 순서를
+      // 똑같이 맞춰야 여기서 확인한 시그니처와 실행 때 실제로 부르는 함수가 일치한다.
+      if (isBuiltinName(expr.callee)) {
+        const signature = BUILTIN_SIGNATURES[expr.callee];
+
+        if (expr.args.length !== signature.params.length) {
+          return {
+            ok: false,
+            diagnostics: [typeError(
+              `함수 '${expr.callee}'는 인자 ${signature.params.length}개가 필요하지만 ${expr.args.length}개를 받았습니다`,
+            )],
+          };
+        }
+
+        const diagnostics: Diagnostic[] = [];
+        for (let index = 0; index < expr.args.length; index += 1) {
+          const argument = checkExpr(expr.args[index], scope, ctx);
+          if (!argument.ok) {
+            diagnostics.push(...argument.diagnostics);
+            continue;
+          }
+
+          const expected = signature.params[index];
+          if (expected === "any") {
+            if (argument.type === "void") {
+              diagnostics.push(typeError(
+                `함수 '${expr.callee}'의 ${index + 1}번째 인자는 값이 있는 타입이어야 하지만 void 타입입니다`,
+              ));
+            }
+          } else if (argument.type !== expected) {
+            diagnostics.push(typeError(
+              `함수 '${expr.callee}'의 ${index + 1}번째 인자는 ${expected} 타입이어야 하지만 ${argument.type} 타입입니다`,
+            ));
+          }
+        }
+
+        if (diagnostics.length > 0) return { ok: false, diagnostics };
+        return { ok: true, type: signature.returnType };
+      }
+
       const signature = ctx.functions.get(expr.callee);
       if (signature === undefined) {
         return {
@@ -414,6 +493,15 @@ export function checkProgram(program: Program): readonly Diagnostic[] {
   // 본문보다 먼저 모든 시그니처를 모으면 앞의 함수가 뒤에 적힌 함수를 호출할 수 있고,
   // 서로를 부르는 상호 재귀도 선언 순서와 무관해진다.
   for (const func of program.functions) {
+    if (isBuiltinName(func.name)) {
+      // 이미터는 이 이름의 호출을 언제나 프렐류드로 보낸다. 선언을 허용하면 사용자가
+      // 만든 함수는 호출될 수 없는 죽은 코드가 되므로, 표에 넣지 않고 선언 자리에서 알린다.
+      diagnostics.push(typeError(
+        `'${func.name}'는 내장 함수 이름이라 다시 선언할 수 없습니다`,
+      ));
+      continue;
+    }
+
     if (mutableFunctions.has(func.name)) {
       // 스코프 재선언과 같은 규칙으로 먼저 등록된 시그니처를 유지한다.
       diagnostics.push(typeError(`함수 '${func.name}'이 이미 선언되어 있습니다`));
