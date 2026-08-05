@@ -26,4 +26,22 @@ type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1
 const wordCharsMatch: Eq<WordChars, ["h", "e", "l", "l", "o"]> = true;
 const wordLengthMatches: Eq<WordLength, 5> = true;
 
+// codeStep 360 — 이모지 문자열의 Length 계산 변화 확인하기
+
+const greeting = "😀abc";
+type EmojiChars = SplitChars<typeof greeting>;
+type EmojiLength = Length<typeof greeting>;
+
+// 타입스크립트 7.0부터 infer 패턴은 UTF-16 코드 유닛이 아니라 유니코드 코드 포인트 단위로 문자열을 나눈다.
+// 따라서 이모지는 반쪽으로 갈라지지 않고 하나의 원소가 되며, 타입 수준의 Length는 4가 된다.
+const emojiCharsMatch: Eq<EmojiChars, ["😀", "a", "b", "c"]> = true;
+const emojiLengthMatches: Eq<EmojiLength, 4> = true;
+
+// 반면 자바스크립트 문자열의 .length는 여전히 UTF-16 코드 유닛 수를 세므로 같은 문자열에서 5를 돌려준다.
+console.log(greeting, greeting.length);
+
+// 전개 구문은 for...of와 마찬가지로 코드 포인트 단위로 순회한다.
+// 타입 수준의 Length 4는 이제 런타임의 .length 5가 아니라 [...greeting].length 4와 같은 기준이다.
+console.log("code points:", [...greeting].length, "code units:", greeting.length);
+
 export {};
