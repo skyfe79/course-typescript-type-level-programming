@@ -80,12 +80,18 @@ interface Stage<Kind extends string, In extends PixelFormat, Out extends PixelFo
   readonly out: Out;
 }
 
-interface InvertStage extends Stage<"invert", "RGBA8", "RGBA8"> {}
-interface GrayscaleStage extends Stage<"grayscale", "RGBA8", "Gray8"> {}
-interface BrightnessStage extends Stage<"brightness", "RGBA8", "RGBA8"> {
+// codeStep 434 — 그레이스케일부터 Stage 대신 PixelStage를 확장해 실행 함수를 갖게 한다.
+// PixelStage와 mapPixels의 정의는 파이프라인 타입 설명이 끝난 이 파일 아래쪽에 있다. 인터페이스
+// 이름은 선언 위치보다 앞에서도 참조할 수 있으므로, 여기서는 "무엇을 하는 스테이지인가"를 먼저 읽고
+// "어떻게 도는가"는 뒤에서 읽게 된다.
+interface GrayscaleStage extends PixelStage<"grayscale", "RGBA8", "Gray8"> {}
+
+// codeStep 435 — 출력 포맷이 그대로인 나머지 세 효과도 같은 실행 계약으로 옮긴다.
+interface InvertStage extends PixelStage<"invert", "RGBA8", "RGBA8"> {}
+interface BrightnessStage extends PixelStage<"brightness", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
-interface ContrastStage extends Stage<"contrast", "RGBA8", "RGBA8"> {
+interface ContrastStage extends PixelStage<"contrast", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
 
@@ -94,19 +100,43 @@ type AnyStage = InvertStage | GrayscaleStage | BrightnessStage | ContrastStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
-  return { kind: "invert", in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "invert",
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", invertPixel),
+  };
 }
 
+// codeStep 434 — 그레이스케일 스테이지에 공유 순회로 이어지는 실행 함수를 얹는다.
 function grayscaleStage(): GrayscaleStage {
-  return { kind: "grayscale", in: "RGBA8", out: "Gray8" };
+  return {
+    kind: "grayscale",
+    in: "RGBA8",
+    out: "Gray8",
+    run: (buf) => mapPixels(buf, "Gray8", toGrayscale),
+  };
 }
 
+// codeStep 435 — 세 생성자도 각자의 커널을 공유 순회에 건네는 실행 함수를 돌려준다.
 function brightnessStage(amount: number): BrightnessStage {
-  return { kind: "brightness", amount, in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "brightness",
+    amount,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", brightnessKernel(amount)),
+  };
 }
 
 function contrastStage(amount: number): ContrastStage {
-  return { kind: "contrast", amount, in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "contrast",
+    amount,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", contrastKernel(amount)),
+  };
 }
 
 // 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
@@ -135,6 +165,9 @@ interface FlipStage extends Stage<"flip", "RGBA8", "RGBA8"> {}
 type AnyStageWithFlip = AnyStage | FlipStage;
 
 function flipStage(): FlipStage {
+  // codeStep 435 — FlipStage는 이번 화의 픽셀 커널 대상에서 의도적으로 제외한다.
+  // 뒤집기는 주변 픽셀의 위치까지 알아야 하는 기하 변환이라 픽셀 하나만 받는 커널로 표현하지 않는다.
+  // 따라서 FlipStage는 이번 화에도 실행 함수가 없는 순수 Stage로 남는다.
   return { kind: "flip", in: "RGBA8", out: "RGBA8" };
 }
 
@@ -258,6 +291,102 @@ function brokenPipelineDemo(): void {
   run(pipeline(grayscaleStage(), brightnessStage(20)));
 }
 
+// codeStep 434 — 네 효과가 함께 쓸 픽셀 순회와 그레이스케일 커널을 만든다.
+// 포맷마다 픽셀 하나가 몇 자리인지를 타입으로 고정한다.
+interface PixelTupleOf {
+  RGBA8: readonly [number, number, number, number];
+  RGB8: readonly [number, number, number];
+  Gray8: readonly [number];
+}
+
+type Pixel<Format extends PixelFormat> = PixelTupleOf[Format];
+
+// 커널은 입력 픽셀 하나를 받아 출력 픽셀 하나를 돌려주는 함수 그 자체다.
+type PixelKernel<In extends PixelFormat, Out extends PixelFormat> = (
+  pixel: Pixel<In>,
+) => Pixel<Out>;
+
+function mapPixels<In extends PixelFormat, Out extends PixelFormat>(
+  source: ImageBuffer<In>,
+  outFormat: Out,
+  kernel: PixelKernel<In, Out>,
+): ImageBuffer<Out> {
+  const pixelCount = source.width * source.height;
+
+  // In은 런타임에 지워지는 팬텀 타입이라 bytesPerPixel에 넘길 포맷 값이 없다.
+  // 그래서 입력 한 픽셀의 바이트 수는 버퍼 전체 길이를 픽셀 수로 나누어 되찾는다.
+  // 출력 포맷은 실제 인자로 받았으므로 기존 bytesPerPixel을 그대로 사용할 수 있다.
+  const inBytes = source.data.length / pixelCount;
+  const outBytes = bytesPerPixel(outFormat);
+  const out = new Uint8ClampedArray(pixelCount * outBytes);
+
+  for (let i = 0; i < pixelCount; i += 1) {
+    const start = i * inBytes;
+    // In이 아직 미해결인 제네릭이라 Pixel<In>의 후보 튜플 길이가 충돌해 never로 줄어든다.
+    // 이 구현 경계에서만 unknown을 거치는 이중 단언으로, 실제 버퍼에서 자른 한 픽셀임을 알려 준다.
+    const pixel = Array.from(source.data.slice(start, start + inBytes)) as unknown as Pixel<In>;
+    // readonly 튜플도 ArrayLike<number>를 만족하므로 set에는 별도 단언이 필요 없다.
+    // Uint8ClampedArray에 쓰는 순간 범위를 벗어난 채널 값도 자동으로 0~255에 맞춰진다.
+    out.set(kernel(pixel), i * outBytes);
+  }
+
+  // 픽셀 포맷과 데이터 길이는 달라져도 이미지의 공간 크기는 그대로 보존한다.
+  return makeImageBuffer<Out>(out, source.width, source.height);
+}
+
+const toGrayscale: PixelKernel<"RGBA8", "Gray8"> = ([r, g, b]) => [
+  Math.round(0.299 * r + 0.587 * g + 0.114 * b),
+];
+
+// Stage는 여전히 "무엇을 할지"만 말하는 데이터이고, PixelStage는 거기에 "어떻게 할지"를 더한다.
+interface PixelStage<Kind extends string, In extends PixelFormat, Out extends PixelFormat>
+  extends Stage<Kind, In, Out> {
+  readonly run: (source: ImageBuffer<In>) => ImageBuffer<Out>;
+}
+
+// run을 얹어도 describeStage의 소진 검사와 CheckAdjacent/pipeline의 포맷 검사는 그대로 동작한다.
+// 그 타입들은 스테이지의 kind·in·out만 읽고, 새 함수 프로퍼티의 구체적인 내용에는 의존하지 않는다.
+// 또한 JSON.stringify는 함수 값 프로퍼티를 생략하므로 기존 plan 출력도 한 글자도 달라지지 않는다.
+
+// codeStep 435 — 출력 포맷은 그대로 두고 채널 값만 바꾸는 세 커널을 더한다.
+// 그레이스케일만 출력 포맷이 Gray8로 바뀌므로 변환을 드러내는 toGrayscale이라는 이름을 쓴다.
+// 나머지는 커널과 스테이지 생성자를 눈으로 구분할 수 있게 Pixel/Kernel 접미사를 붙인다.
+const invertPixel: PixelKernel<"RGBA8", "RGBA8"> = ([r, g, b, a]) => [
+  255 - r,
+  255 - g,
+  255 - b,
+  a,
+];
+
+// 밝기와 대비는 스테이지의 amount마다 다른 커널을 만들어야 하므로 커널 팩토리로 표현한다.
+const brightnessKernel = (delta: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => [r + delta, g + delta, b + delta, a];
+
+const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => [
+    (r - 128) * factor + 128,
+    (g - 128) * factor + 128,
+    (b - 128) * factor + 128,
+    a,
+  ];
+
+// codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
+function clampingContrast(): string {
+  const clamped = new Uint8ClampedArray(2);
+  const wrapped = new Uint8Array(2);
+
+  // Clamped 배열은 이미지 채널에 알맞게 0~255로 자르고, 일반 Uint8 배열은 256을 기준으로 감싼다.
+  clamped[0] = 280;
+  clamped[1] = -20;
+  wrapped[0] = 280;
+  wrapped[1] = -20;
+
+  return (
+    `Uint8ClampedArray 280→${clamped[0]}, -20→${clamped[1]} / ` +
+    `Uint8Array 280→${wrapped[0]}, -20→${wrapped[1]}`
+  );
+}
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -307,6 +436,37 @@ function main(): void {
 
   // 방금 쓴 파일을 같은 함수로 다시 읽는다. 두 줄이 똑같이 찍히면 왕복이 성립한 것이다.
   readPng(OUTPUT_URL);
+
+  // codeStep 434 — 1×1 버퍼로 공유 순회가 그레이스케일 커널 하나를 실행하는 모습을 확인한다.
+  // 네 채널 모두 계산 결과가 0~255 안에 머무는 중간 톤 픽셀을 골라, 여기서는 커널의 계산만 보이게 한다.
+  const samplePixel: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray([200, 140, 90, 255]),
+    1,
+    1,
+  );
+  console.log(`그레이스케일 픽셀 ${Array.from(grayscaleStage().run(samplePixel).data)}`);
+  // codeStep 435 — 나머지 세 효과도 같은 mapPixels를 지나며 건네는 커널만 달라진다.
+  console.log(`반전 픽셀 ${Array.from(invertStage().run(samplePixel).data)}`);
+  console.log(`밝기 50 픽셀 ${Array.from(brightnessStage(50).run(samplePixel).data)}`);
+  console.log(`대비 1.5 픽셀 ${Array.from(contrastStage(1.5).run(samplePixel).data)}`);
+
+  // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
+  // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
+  // 나머지 두 채널은 그대로 더해지므로, 잘린 자리가 어디인지 출력에서 바로 가려진다.
+  const brightPixel: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray([230, 10, 40, 255]),
+    1,
+    1,
+  );
+  console.log(`밝기 50 넘침 픽셀 ${Array.from(brightnessStage(50).run(brightPixel).data)}`);
+  console.log(`클램핑 대조 ${clampingContrast()}`);
+
+  const decodedGrayscale = grayscaleStage().run(decodedImage);
+  console.log(
+    `실제 PNG 그레이스케일 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${decodedGrayscale.width}x${decodedGrayscale.height} bytes=${decodedImage.data.length} -> ` +
+      `${decodedGrayscale.data.length}`,
+  );
 }
 
 main();
