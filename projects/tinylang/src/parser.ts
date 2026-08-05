@@ -1,6 +1,6 @@
 // 토큰 배열 위를 한 번만 앞으로 이동하면서, 연산자 우선순위가 드러나는 식 트리를 만든다.
 
-import type { Block, Expr, IfStatement, Statement, TypeName } from "./ast.ts";
+import type { Block, Expr, FuncDecl, IfStatement, Param, Statement, TypeName } from "./ast.ts";
 import { makeDiagnostic } from "./diagnostics.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 import type { Keyword, Operator, Punct, Token, TokenKind } from "./tokens.ts";
@@ -522,6 +522,79 @@ export function createParser(tokens: readonly Token[]) {
     return { ok: true, value: { kind: "return", value: value.value } };
   }
 
+  function parseParam(): ParseResult<Param> {
+    const name = expectIdentifier();
+    if (!name.ok) return name;
+
+    // 매개변수 이름과 타입을 콜론으로 분리해 두면, 호출자가 넘길 값의 타입을 함수
+    // 본문까지 읽지 않고도 선언의 시그니처만으로 확인할 수 있다.
+    const colon = expectPunct(":");
+    if (!colon.ok) return colon;
+
+    const typeAnnotation = parseTypeAnnotation();
+    if (!typeAnnotation.ok) return typeAnnotation;
+
+    return {
+      ok: true,
+      value: { name: name.value, typeAnnotation: typeAnnotation.value },
+    };
+  }
+
+  function parseFnDecl(): ParseResult<FuncDecl> {
+    const keyword = expectKeyword("fn");
+    if (!keyword.ok) return keyword;
+
+    const name = expectIdentifier();
+    if (!name.ok) return name;
+
+    const opened = expectPunct("(");
+    if (!opened.ok) return opened;
+
+    const params: Param[] = [];
+
+    // 바로 닫는 괄호가 오면 0개로 끝낸다. 그렇지 않으면 하나를 먼저 읽고 콤마가
+    // 있는 동안만 더 읽는다. 이 "하나 읽고 반복" 패턴 하나로 1개와 N개를 함께
+    // 처리하고, 바깥의 닫는 괄호 검사까지 합쳐 0개인 목록도 같은 흐름에 놓는다.
+    if (!checkPunct(")")) {
+      const firstParam = parseParam();
+      if (!firstParam.ok) return firstParam;
+      params.push(firstParam.value);
+
+      while (matchPunct(",")) {
+        const param = parseParam();
+        if (!param.ok) return param;
+        params.push(param.value);
+      }
+    }
+
+    const closed = expectPunct(")");
+    if (!closed.ok) return closed;
+
+    // 반환 타입을 선언 시점에 반드시 적게 하면 본문을 살펴보지 않아도 함수의 입력과
+    // 출력 시그니처가 모두 확정된다. 타입 이름의 범위는 기존 세 가지를 그대로 쓴다.
+    const colon = expectPunct(":");
+    if (!colon.ok) return colon;
+
+    const returnType = parseTypeAnnotation();
+    if (!returnType.ok) return returnType;
+
+    // 함수 본문도 별도 규칙을 만들지 않고 이미 완성된 블록 파서에 맡긴다. 따라서
+    // 지난 단계에서 추가한 if와 while을 비롯한 모든 문을 함수 안에서도 그대로 쓴다.
+    const body = parseBlock();
+    if (!body.ok) return body;
+
+    return {
+      ok: true,
+      value: {
+        kind: "funcDecl",
+        name: name.value,
+        params,
+        returnType: returnType.value,
+        body: body.value,
+      },
+    };
+  }
+
   // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
   // 들어오고, 개별 우선순위 함수도 교육용 관찰 스크립트에서 계속 확인할 수 있다.
   return {
@@ -538,5 +611,7 @@ export function createParser(tokens: readonly Token[]) {
     parseBlock,
     parseIfStatement,
     parseWhileStatement,
+    parseFnDecl,
+    parseParam,
   };
 }
