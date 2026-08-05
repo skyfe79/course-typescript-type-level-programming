@@ -145,4 +145,97 @@ const stringsAtRuntime = [1, "a", 2, "b"].reduce<string[]>(
 console.log("Rebuilt with reduce:", rebuiltAtRuntime);
 console.log("Only strings with reduce:", stringsAtRuntime);
 
+// codeStep 335 — ReduceT로 숫자의 합을 구한다.
+
+// 단순한 대입은 결과가 넓은 타입이어도 통과할 수 있다. 두 타입이 정확히 같은지를 비교하는 Eq를
+// 한 번 선언하고, 이번 화에서 만드는 세 결과가 기대한 리터럴과 인터섹션을 그대로 보존하는지 증명한다.
+type Eq<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends
+  (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+// 앞서 만든 튜플 산술을 이 파일에서도 스스로 완결되도록 다시 선언한다.
+// 목표 길이에 닿을 때까지 자리표시자를 누산기에 쌓으면 숫자 리터럴 N을 튜플 길이로 표현할 수 있다.
+type BuildTuple<N extends number, Acc extends unknown[] = []> =
+  Acc["length"] extends N ? Acc : BuildTuple<N, [...Acc, unknown]>;
+
+// 숫자 두 개를 각각 튜플로 만든 뒤 이어 붙이면, 이어 붙인 튜플의 길이가 덧셈 결과다.
+type Add<A extends number, B extends number> =
+  [...BuildTuple<A>, ...BuildTuple<B>]["length"];
+
+// 제네릭 화살표 결합 함수는 실제 누산기와 원소의 리터럴 타입을 잃을 수 있으므로 TypeFn2를 사용한다.
+// acc와 item은 선언상 unknown이다. 각 슬롯을 따로 좁히는 중첩 조건부 타입을 거친 뒤에만 Add에 넘긴다.
+interface SumF extends TypeFn2 {
+  readonly out: this["acc"] extends number
+    ? this["item"] extends number
+      ? Add<this["acc"], this["item"]>
+      : never
+    : never;
+}
+
+type Total = ReduceT<[1, 2, 3, 4], SumF, 0>;
+
+// ReduceT가 숫자 리터럴을 단계마다 더해 정확히 10을 만들었음을 타입 동일성으로 고정한다.
+const totalIsTen: Eq<Total, 10> = true;
+// @ts-expect-error - Total은 10이므로 11과 정확히 같은 타입일 수 없다
+const totalIsNotEleven: Eq<Total, 11> = true;
+
+// codeStep 336 — ReduceT로 문자열을 이어 붙인다.
+
+// Join도 같은 TypeFn2 인코딩을 쓴다. acc를 string으로, item을 string | number로 차례로 좁혀야
+// unknown인 두 슬롯을 템플릿 리터럴 타입 안에서 안전하게 사용할 수 있다.
+// 빈 문자열은 첫 원소 앞에 쉼표가 붙지 않게 하는 시작값이고, 그 뒤부터는 쉼표와 원소를 함께 붙인다.
+interface JoinF extends TypeFn2 {
+  readonly out: this["acc"] extends string
+    ? this["item"] extends string | number
+      ? this["acc"] extends ""
+        ? `${this["item"]}`
+        : `${this["acc"]},${this["item"]}`
+      : never
+    : never;
+}
+
+type Csv = ReduceT<["red", "green", "blue"], JoinF, "">;
+
+// 각 문자열 리터럴이 보존되어 최종 결과가 정확히 하나의 CSV 문자열 리터럴이 된다.
+const csvIsExact: Eq<Csv, "red,green,blue"> = true;
+// @ts-expect-error - JoinF는 원소 사이를 쉼표로 연결하므로 공백으로 연결한 문자열은 결과가 아니다
+const csvIsNotSpaced: Eq<Csv, "red green blue"> = true;
+
+// codeStep 337 — ReduceT로 엔트리 튜플을 객체 타입으로 합친다.
+
+// 읽기 전용 [키, 값] 튜플에 이름을 붙여 타입 레벨 결합과 값 레벨 함수가 같은 입력 모양을 공유한다.
+type Entry = readonly [string, unknown];
+
+// ToObjectF도 제네릭 화살표 대신 TypeFn2의 슬롯을 채우는 방식으로 적용한다.
+// 키와 값은 this["item"] 자체를 조건부 타입으로 직접 분해해야 각각의 리터럴 타입으로 추론된다.
+// 중첩된 infer 제약 안에서 다시 K와 V를 추론하면 string과 unknown으로 넓어질 수 있으므로 쓰지 않는다.
+// acc는 새 Record와 인터섹션할 수 있으므로 별도 제약으로 넓히지 않고 지금까지 만든 타입을 그대로 잇는다.
+interface ToObjectF extends TypeFn2 {
+  readonly out: this["item"] extends readonly [
+    infer K extends string,
+    infer V
+  ]
+    ? this["acc"] & Record<K, V>
+    : never;
+}
+
+type Entries = readonly [readonly ["id", 1], readonly ["name", "Ada"]];
+type Merged = ReduceT<Entries, ToObjectF, {}>;
+
+// 시작값 {}에 각 Record가 왼쪽부터 교차되어 원래의 인터섹션 형태까지 정확히 남는다.
+type ExpectedMerged = {} & Record<"id", 1> & Record<"name", "Ada">;
+const mergedIsExact: Eq<Merged, ExpectedMerged> = true;
+// @ts-expect-error - 두 번째 엔트리도 합쳐지므로 name 속성이 없는 객체는 Merged가 아니다
+const mergedCannotDropName: Merged = { id: 1 };
+
+// 값 레벨에서도 같은 엔트리 배열을 Object.fromEntries에 넘기면 타입 레벨 폴드와 같은 객체가 만들어진다.
+function toObject<T extends readonly Entry[]>(entries: T) {
+  return Object.fromEntries(entries);
+}
+
+console.log("Merged:", toObject([["id", 1], ["name", "Ada"]] as const));
+
+// Sum, Join, ToObject에서 바뀐 것은 결합 방식 F와 시작값 Init뿐이다.
+// 머리를 결합하고 꼬리로 진행하는 재귀는 세 경우 모두 처음 만든 ReduceT를 그대로 사용한다.
+
 export {};
