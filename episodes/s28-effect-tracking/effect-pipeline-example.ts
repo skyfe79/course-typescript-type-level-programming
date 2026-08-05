@@ -58,4 +58,19 @@ console.log("readFileStep 단독 실행:", readFileStep("input.txt").run());
 console.log("fetchStep 단독 실행:", fetchStep("https://api.example.com").run());
 logStep("logStep 단독 실행: 준비 완료").run();
 
+// codeStep 405 — 단계를 이어 붙여 파이프라인 만들기
+
+// 안쪽 chain은 파일 읽기와 네트워크 요청을 잇고, 바깥 chain은 그 결과에 로깅을 잇는다.
+// 콜백의 data와 response를 보면 앞 단계의 결과가 다음 단계의 입력으로 그대로 전달된다.
+const pipeline = chain(
+  chain(readFileStep("input.txt"), (data) =>
+    fetchStep(`https://api.example.com?data=${data}`)
+  ),
+  (response) => logStep(`fetched: ${response}`)
+);
+
+// 실행 결과에서 읽은 bytes가 URL에 들어가고, 그 응답 전체가 로그에 들어간 흐름을 확인할 수 있다.
+console.log("합성한 pipeline 실행:");
+pipeline.run();
+
 export {};
