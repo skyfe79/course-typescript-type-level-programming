@@ -19,14 +19,24 @@ interface OptionalFields {
 // set() 하나로 모든 필드를 다루기 위해 두 필드 집합을 합친다.
 type AllFields = RequiredFields & OptionalFields;
 
-class UserBuilder {
+// codeStep 398 — 제공한 키를 누적하는 타입 매개변수 연결하기
+
+// Eq는 두 타입이 정확히 같은지 판별해, 누적 결과를 컴파일러가 계속 검사하게 한다.
+type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+// Provided는 지금까지 set()으로 제공된 필수 키만 유니온으로 기억한다.
+class UserBuilder<Provided extends keyof RequiredFields = never> {
   // 빌드 도중에는 일부 값만 들어 있으므로 내부 저장소는 Partial이어야 한다.
   private fields: Partial<AllFields> = {};
 
-  // 아직은 어떤 키를 받았는지 타입에 기록하지 않고 현재 빌더를 그대로 반환한다.
-  set<K extends keyof AllFields>(key: K, value: AllFields[K]): this {
+  // K가 필수 키일 때만 Provided에 더한다. 선택 키는 빌드 가능 여부를 바꾸지 않는다.
+  set<K extends keyof AllFields>(
+    key: K,
+    value: AllFields[K],
+  ): UserBuilder<K extends keyof RequiredFields ? Provided | K : Provided> {
     this.fields[key] = value;
-    return this;
+    // 같은 인스턴스를 돌려준다. build의 this 타입도 상태마다 달라지므로 unknown을 거쳐 상태만 갱신한다.
+    return this as unknown as UserBuilder<K extends keyof RequiredFields ? Provided | K : Provided>;
   }
 
   // 현재 단계에는 완전성 제약이 없어 비어 있는 객체도 AllFields라고 단언할 수 있다.
@@ -40,5 +50,14 @@ function tryBuildWithoutAnyFields(): void {
   // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
   new UserBuilder().build();
 }
+
+const withId = new UserBuilder().set("id", "user-1");
+const idIsAccumulated: Eq<typeof withId, UserBuilder<"id">> = true;
+
+const withIdAndNickname = withId.set("nickname", "타입 탐험가");
+const optionalKeyDoesNotAccumulate: Eq<
+  typeof withIdAndNickname,
+  UserBuilder<"id">
+> = true;
 
 export {};
