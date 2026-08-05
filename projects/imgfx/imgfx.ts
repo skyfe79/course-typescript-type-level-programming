@@ -1363,10 +1363,88 @@ const FLAG_SPEC = {
   },
 } as const satisfies Record<string, FlagSpec>;
 
+// codeStep 453 — 실행 스테이지를 만드는 플래그와 CLI 자체의 선택을 나타내는 옵션은
+// 서로 다른 표에 둔다. 옵션은 스테이지를 만들지 않으므로 소비할 인자 수만 알면 된다.
+interface OptionSpec {
+  readonly arity: number;
+}
+
+const OPTION_SPEC = {
+  "--save": { arity: 1 },
+  "--chain": { arity: 1 },
+} as const satisfies Record<string, OptionSpec>;
+
+interface CliOptions {
+  readonly save?: string;
+  readonly chain?: string;
+}
+
 // codeStep 452 — 런타임 문자열이 실제 테이블 키인지 확인한 사실을 타입 검사기에도 전달한다.
 function isKnownFlag(flag: string): flag is keyof typeof FLAG_SPEC {
   // Object.prototype에서 물려받은 이름까지 플래그로 오해하지 않도록 자체 키만 검사한다.
   return Object.hasOwn(FLAG_SPEC, flag);
+}
+
+// codeStep 453 — 옵션 표도 런타임 문자열을 자신의 키 유니온으로 좁힌다.
+function isKnownOption(flag: string): flag is keyof typeof OPTION_SPEC {
+  return Object.hasOwn(OPTION_SPEC, flag);
+}
+
+// codeStep 453 — 한 줄에 섞인 CLI 옵션은 따로 모으고, 스테이지 파서가 읽을 나머지는
+// 원래 순서대로 남겨 둔다. 같은 옵션을 두 번 쓰면 어느 경로가 최종 값인지 모호해지므로 거부한다.
+function splitCliArgs(
+  argv: readonly string[],
+): { options: CliOptions; stageArgs: string[] } {
+  const stageArgs: string[] = [];
+  let save: string | undefined;
+  let chain: string | undefined;
+  let index = 0;
+
+  while (index < argv.length) {
+    const token = argv[index];
+
+    if (isKnownOption(token)) {
+      const spec = OPTION_SPEC[token];
+      const args = argv.slice(index + 1, index + 1 + spec.arity);
+      if (args.length < spec.arity) {
+        throw new Error(`${token}는 인자 ${spec.arity}개가 필요합니다`);
+      }
+
+      if (token === "--save") {
+        if (save !== undefined) {
+          throw new Error("--save는 한 번만 사용할 수 있습니다");
+        }
+        save = args[0];
+      } else {
+        if (chain !== undefined) {
+          throw new Error("--chain은 한 번만 사용할 수 있습니다");
+        }
+        chain = args[0];
+      }
+
+      index += 1 + spec.arity;
+      continue;
+    }
+
+    if (isKnownFlag(token)) {
+      const spec = FLAG_SPEC[token];
+      // 두 표가 같은 문자열 열을 나눠 읽는다. 스테이지 플래그와 그 인자를 통째로
+      // 건너뛰어야 `--blur --save`의 --save를 별도 옵션으로 오해하지 않는다.
+      stageArgs.push(...argv.slice(index, index + 1 + spec.arity));
+      index += 1 + spec.arity;
+      continue;
+    }
+
+    // 모르는 토큰은 스테이지 파서에 남겨, 기존처럼 알 수 없는 플래그 오류를 내게 한다.
+    stageArgs.push(token);
+    index += 1;
+  }
+
+  const options: CliOptions = {
+    ...(save === undefined ? {} : { save }),
+    ...(chain === undefined ? {} : { chain }),
+  };
+  return { options, stageArgs };
 }
 
 // codeStep 452 — 스펙의 arity만큼 인자를 소비하고 같은 순서로 스테이지를 쌓는다.
@@ -1395,10 +1473,157 @@ function parseFlags(argv: readonly string[]): ExecutableStage[] {
   return stages;
 }
 
-// codeStep 452 — 문법 오류가 어느 경로에서 나도 같은 한 줄 사용법을 보여 준다.
-const CLI_USAGE = "사용법: imgfx apply <입력파일> [스테이지 플래그…]";
+// codeStep 453 — 실행 계획을 사람이 읽고 다시 건네줄 수 있는 JSON 파일로 보존한다.
+function saveChain(stages: readonly ExecutableStage[], path: string): void {
+  // JSON.stringify는 kind·in·out과 각 스테이지의 매개변수만 남기고 run 함수는 지운다.
+  // JSON은 함수도 타입도 들고 다닐 수 없으므로 이 파일 하나만으로는 아무것도 실행할 수 없다.
+  // 다시 읽는 경계에서 각 종류의 생성자를 불러 손실된 실행 함수를 채워야 한다.
+  writeFileSync(path, JSON.stringify(stages, null, 2));
+}
 
-// codeStep 452 — 이번 단계는 apply 문법과 계획만 확인한다. 실제 파일 실행은 아직 연결하지 않는다.
+// codeStep 453 — JSON.parse의 unknown 값에서 필드를 읽을 수 있는 최소한 객체 경계다.
+// 배열과 null도 typeof 결과가 object이므로 명시적으로 제외한다.
+function asStageRecord(value: unknown, index: number): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`체인 파일 ${index + 1}번째 항목은 객체여야 합니다`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readNumberField(
+  record: Record<string, unknown>,
+  field: string,
+  index: number,
+): number {
+  const value = record[field];
+  if (typeof value !== "number") {
+    throw new Error(`체인 파일 ${index + 1}번째 항목의 ${field}는 숫자여야 합니다`);
+  }
+  return value;
+}
+
+function readEdgePolicy(value: unknown, index: number): EdgePolicy {
+  if (value === "clamp" || value === "wrap" || value === "mirror") {
+    return value;
+  }
+
+  throw new Error(
+    `체인 파일 ${index + 1}번째 항목의 edge는 clamp, wrap, mirror 중 하나여야 합니다`,
+  );
+}
+
+// 생성자가 범위·정수·홀수 같은 불변식을 거부하면 파일의 몇 번째 값인지를 덧붙인다.
+function rebuildStage(
+  index: number,
+  build: () => ExecutableStage,
+): ExecutableStage {
+  try {
+    return build();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`체인 파일 ${index + 1}번째 항목: ${message}`);
+  }
+}
+
+// codeStep 453 — 저장된 객체를 ExecutableStage로 단언하지 않고 kind로 갈래를 나눈 뒤
+// 해당 생성자를 다시 부른다. 단언은 JSON.stringify가 지운 run을 만들어 내지 못해,
+// run이 undefined인 객체가 실행기에 들어간 뒤 실행 순간에야 터지게 한다. 생성자 재호출만이
+// 실행 함수를 되살리는 동시에 파일에서 온 값을 CLI에서 온 값과 같은 규칙으로 검사한다.
+// 따라서 `--blur 4`가 명령줄에서 거부되듯 side: 4도 파일을 읽는 순간 거부된다.
+// 입구가 둘이어도 검증을 생성자에 두었기 때문에 규칙은 하나로 유지된다.
+function validateStage(value: unknown, index: number): ExecutableStage {
+  const record = asStageRecord(value, index);
+  const kind = record.kind;
+
+  if (typeof kind !== "string") {
+    throw new Error(`체인 파일 ${index + 1}번째 항목의 kind는 문자열이어야 합니다`);
+  }
+
+  switch (kind) {
+    case "invert":
+      return invertStage();
+    case "grayscale":
+      return grayscaleStage();
+    case "brightness": {
+      const amount = readNumberField(record, "amount", index);
+      return rebuildStage(index, () => brightnessStage(amount));
+    }
+    case "contrast": {
+      const amount = readNumberField(record, "amount", index);
+      return rebuildStage(index, () => contrastStage(amount));
+    }
+    case "threshold": {
+      const level = readNumberField(record, "level", index);
+      return rebuildStage(index, () => thresholdStage(level));
+    }
+    case "saturate": {
+      const factor = readNumberField(record, "factor", index);
+      return rebuildStage(index, () => saturateStage(factor));
+    }
+    case "convolve": {
+      const effect = record.effect;
+      if (typeof effect !== "string") {
+        throw new Error(`체인 파일 ${index + 1}번째 항목의 effect는 문자열이어야 합니다`);
+      }
+
+      const edge = readEdgePolicy(record.edge, index);
+      switch (effect) {
+        case "box": {
+          const side = readNumberField(record, "side", index);
+          return rebuildStage(index, () => boxBlurStage(side, edge));
+        }
+        case "gaussian":
+          return gaussianBlurStage(edge);
+        case "sharpen":
+          return sharpenStage(edge);
+        default:
+          throw new Error(
+            `체인 파일 ${index + 1}번째 항목의 convolve effect를 알 수 없습니다: ${effect}`,
+          );
+      }
+    }
+    case "flip": {
+      const direction = record.direction;
+      if (direction !== "horizontal" && direction !== "vertical") {
+        throw new Error(
+          `체인 파일 ${index + 1}번째 항목의 direction은 horizontal 또는 vertical이어야 합니다`,
+        );
+      }
+      return flipStage(direction);
+    }
+    case "rotate": {
+      const rotation = record.rotation;
+      if (rotation !== "90" && rotation !== "180" && rotation !== "270") {
+        throw new Error(
+          `체인 파일 ${index + 1}번째 항목의 rotation은 90, 180, 270 중 하나여야 합니다`,
+        );
+      }
+      return rotateStage(rotation);
+    }
+    default:
+      throw new Error(`체인 파일 ${index + 1}번째 항목의 kind를 알 수 없습니다: ${kind}`);
+  }
+}
+
+// codeStep 453 — JSON.parse의 반환값을 unknown으로 받아, 배열이라는 것을 확인한 뒤에만
+// 각 항목을 검증 및 재구성 경계로 보낸다.
+function loadChain(path: string): ExecutableStage[] {
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!Array.isArray(parsed)) {
+    throw new Error("체인 파일의 최상위 값은 배열이어야 합니다");
+  }
+
+  const values: readonly unknown[] = parsed;
+  return values.map((value, index) => validateStage(value, index));
+}
+
+// codeStep 452 — 문법 오류가 어느 경로에서 나도 같은 한 줄 사용법을 보여 준다.
+const CLI_USAGE =
+  "사용법: imgfx apply <입력파일> [스테이지 플래그…] [--save <파일>] [--chain <파일>]";
+
+// codeStep 453 — 명령줄과 체인 파일 중 하나만 스테이지의 출처로 고른다.
+// 이 단계에서도 실제 이미지 실행은 연결하지 않고 계획과 JSON만 보여 준다.
 function runCli(argv: readonly string[]): void {
   const command = argv[0];
   if (command !== "apply") {
@@ -1410,12 +1635,25 @@ function runCli(argv: readonly string[]): void {
     throw new Error(`입력 파일이 필요합니다\n${CLI_USAGE}`);
   }
 
-  const stages = parseFlags(argv.slice(2));
-  console.log(`CLI 입력 ${inputPath} / 스테이지 ${stages.length}개`);
+  const { options, stageArgs } = splitCliArgs(argv.slice(2));
+  if (options.chain !== undefined && stageArgs.length > 0) {
+    throw new Error("--chain과 스테이지 플래그는 함께 쓸 수 없습니다");
+  }
+
+  const stages = options.chain === undefined
+    ? parseFlags(stageArgs)
+    : loadChain(options.chain);
+  const source = options.chain === undefined ? "명령줄" : `체인파일 ${options.chain}`;
+
+  console.log(`CLI 입력 ${inputPath} / 출처 ${source} / 스테이지 ${stages.length}개`);
   console.log(`CLI 계획 ${planPipeline(stages).join(" / ")}`);
-  // codeStep 452 — JSON.stringify는 run 함수 프로퍼티를 생략한다. 지금 JSON에는 실행 함수가 없으며,
-  // 이 손실이 codeStep 453에서 체인 파일의 데이터 표현을 설계할 출발점이다.
+  // JSON.stringify는 run 함수 프로퍼티를 생략하며, loadChain이 생성자로 그 손실을 메운다.
   console.log(`CLI JSON ${JSON.stringify(stages)}`);
+
+  if (options.save !== undefined) {
+    saveChain(stages, options.save);
+    console.log(`CLI 저장 ${options.save} / 스테이지 ${stages.length}개`);
+  }
 }
 
 function main(): void {
