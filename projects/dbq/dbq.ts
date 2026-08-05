@@ -135,4 +135,23 @@ const allRows = from("users").rows();
 const allRowsMatch: Eq<typeof allRows, {}[]> = true;
 console.log(allRows); // 원본 테이블 전체 컬럼
 
+// codeStep 374 — row.email 접근이 컴파일 에러가 되는지 확인하기
+
+// id와 name만 선택한 결과는 두 컬럼으로 좁혀지므로, 각 행에서도 그 값들만 안전하게 읽힌다.
+const narrowed = from("users").select("id", "name").rows();
+for (const row of narrowed) {
+  console.log(row.id, row.name); // 선택한 id와 name만 행별로 보여 주는 출력이다.
+  // @ts-expect-error - error TS2339: Property 'email' does not exist on type 'Pick<UsersSchema, "id" | "name">'.
+  // 타입 오류를 덮고 실제로 실행하면 undefined가 찍힌다. rows가 선택한 컬럼만 새 객체에 옮겨
+  // 담았으므로, 이 행에는 email이라는 값 자체가 아예 존재하지 않는다.
+  console.log(row.email);
+}
+
+// 같은 조회에 email을 추가하면 반환 행 타입에도 email이 포함되어 같은 접근이 오류 없이 통과한다.
+const withEmail = from("users").select("id", "name", "email").rows();
+const withEmailMatch: Eq<typeof withEmail, Pick<UsersSchema, "id" | "name" | "email">[]> = true;
+for (const row of withEmail) {
+  console.log(row.id, row.name, row.email); // 선택한 세 컬럼을 모두 행별로 보여 주는 출력이다.
+}
+
 export {};
