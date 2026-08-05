@@ -73,4 +73,28 @@ const pipeline = chain(
 console.log("합성한 pipeline 실행:");
 pipeline.run();
 
+// codeStep 406 — 파이프라인 타입에서 이펙트 목록 확인하기
+
+// Effectful의 두 번째 타입 매개변수는 EffectTag로 제한되어 있다.
+// 따라서 그 자리에서 추론하는 E에도 같은 제약을 밝혀, 유효한 이펙트 태그만 뽑히게 한다.
+type PipelineEffects = typeof pipeline extends Effectful<unknown, infer E extends EffectTag>
+  ? E
+  : never;
+
+// 첫 번째 상수는 파이프라인의 결과와 전체 이펙트를 함께 검사한다.
+// 두 번째 상수는 그중 이펙트 목록만 뽑아도 정확히 세 태그인지 검사한다.
+// 둘 다 true로 컴파일된다는 사실이, 구현을 읽지 않고 타입만으로 모든 이펙트를 안다는 증명이다.
+const pipelineCarriesEveryEffect: Eq<
+  typeof pipeline,
+  Effectful<void, "fileIO" | "network" | "logging">
+> = true;
+const pipelineEffectsListIsComplete: Eq<
+  PipelineEffects,
+  "fileIO" | "network" | "logging"
+> = true;
+
+// 타입은 실행 전에 지워지므로 PipelineEffects 자체를 출력할 수는 없다.
+// 이 메시지는 위 두 Eq 검사를 통과한 프로그램이 여기까지 실행되었음을 알려 준다.
+console.log("타입 검사: pipeline에 fileIO, network, logging이 모두 기록되어 있습니다.");
+
 export {};
