@@ -86,11 +86,12 @@ interface Stage<Kind extends string, In extends PixelFormat, Out extends PixelFo
 // "어떻게 도는가"는 뒤에서 읽게 된다.
 interface GrayscaleStage extends PixelStage<"grayscale", "RGBA8", "Gray8"> {}
 
-interface InvertStage extends Stage<"invert", "RGBA8", "RGBA8"> {}
-interface BrightnessStage extends Stage<"brightness", "RGBA8", "RGBA8"> {
+// codeStep 435 — 출력 포맷이 그대로인 나머지 세 효과도 같은 실행 계약으로 옮긴다.
+interface InvertStage extends PixelStage<"invert", "RGBA8", "RGBA8"> {}
+interface BrightnessStage extends PixelStage<"brightness", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
-interface ContrastStage extends Stage<"contrast", "RGBA8", "RGBA8"> {
+interface ContrastStage extends PixelStage<"contrast", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
 
@@ -99,7 +100,12 @@ type AnyStage = InvertStage | GrayscaleStage | BrightnessStage | ContrastStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
-  return { kind: "invert", in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "invert",
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", invertPixel),
+  };
 }
 
 // codeStep 434 — 그레이스케일 스테이지에 공유 순회로 이어지는 실행 함수를 얹는다.
@@ -112,12 +118,25 @@ function grayscaleStage(): GrayscaleStage {
   };
 }
 
+// codeStep 435 — 세 생성자도 각자의 커널을 공유 순회에 건네는 실행 함수를 돌려준다.
 function brightnessStage(amount: number): BrightnessStage {
-  return { kind: "brightness", amount, in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "brightness",
+    amount,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", brightnessKernel(amount)),
+  };
 }
 
 function contrastStage(amount: number): ContrastStage {
-  return { kind: "contrast", amount, in: "RGBA8", out: "RGBA8" };
+  return {
+    kind: "contrast",
+    amount,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", contrastKernel(amount)),
+  };
 }
 
 // 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
@@ -146,6 +165,9 @@ interface FlipStage extends Stage<"flip", "RGBA8", "RGBA8"> {}
 type AnyStageWithFlip = AnyStage | FlipStage;
 
 function flipStage(): FlipStage {
+  // codeStep 435 — FlipStage는 이번 화의 픽셀 커널 대상에서 의도적으로 제외한다.
+  // 뒤집기는 주변 픽셀의 위치까지 알아야 하는 기하 변환이라 픽셀 하나만 받는 커널로 표현하지 않는다.
+  // 따라서 FlipStage는 이번 화에도 실행 함수가 없는 순수 Stage로 남는다.
   return { kind: "flip", in: "RGBA8", out: "RGBA8" };
 }
 
@@ -326,6 +348,28 @@ interface PixelStage<Kind extends string, In extends PixelFormat, Out extends Pi
 // 그 타입들은 스테이지의 kind·in·out만 읽고, 새 함수 프로퍼티의 구체적인 내용에는 의존하지 않는다.
 // 또한 JSON.stringify는 함수 값 프로퍼티를 생략하므로 기존 plan 출력도 한 글자도 달라지지 않는다.
 
+// codeStep 435 — 출력 포맷은 그대로 두고 채널 값만 바꾸는 세 커널을 더한다.
+// 그레이스케일만 출력 포맷이 Gray8로 바뀌므로 변환을 드러내는 toGrayscale이라는 이름을 쓴다.
+// 나머지는 커널과 스테이지 생성자를 눈으로 구분할 수 있게 Pixel/Kernel 접미사를 붙인다.
+const invertPixel: PixelKernel<"RGBA8", "RGBA8"> = ([r, g, b, a]) => [
+  255 - r,
+  255 - g,
+  255 - b,
+  a,
+];
+
+// 밝기와 대비는 스테이지의 amount마다 다른 커널을 만들어야 하므로 커널 팩토리로 표현한다.
+const brightnessKernel = (delta: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => [r + delta, g + delta, b + delta, a];
+
+const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => [
+    (r - 128) * factor + 128,
+    (g - 128) * factor + 128,
+    (b - 128) * factor + 128,
+    a,
+  ];
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -384,6 +428,10 @@ function main(): void {
     1,
   );
   console.log(`그레이스케일 픽셀 ${Array.from(grayscaleStage().run(samplePixel).data)}`);
+  // codeStep 435 — 나머지 세 효과도 같은 mapPixels를 지나며 건네는 커널만 달라진다.
+  console.log(`반전 픽셀 ${Array.from(invertStage().run(samplePixel).data)}`);
+  console.log(`밝기 50 픽셀 ${Array.from(brightnessStage(50).run(samplePixel).data)}`);
+  console.log(`대비 1.5 픽셀 ${Array.from(contrastStage(1.5).run(samplePixel).data)}`);
 }
 
 main();
