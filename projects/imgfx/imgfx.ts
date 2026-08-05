@@ -698,6 +698,39 @@ type ExecutableStage = AnyStageWithFlip | RotateStage;
 // 크기를 타입에 남기려면 rotate90·rotate180·rotate270을 직접 부르고, 실행기 체인에 넣을 때는
 // 그 정보를 포기한다. 정밀한 크기 API와 공통 실행기 API가 함께 존재하는 이유가 이 차이다.
 
+// codeStep 451 — ep_445의 describeStageWithFlip은 AnyStageWithFlip용 소진 검사 스냅샷으로
+// 얼어붙어 있고 유니온도 다르므로 재사용하지 않고, 회전까지 아는 새 설명기를 만든다.
+function describeExecutableStage(stage: ExecutableStage): string {
+  switch (stage.kind) {
+    case "invert":
+      return "반전";
+    case "grayscale":
+      return "그레이스케일";
+    case "brightness":
+      return `밝기 ${stage.amount}`;
+    case "contrast":
+      return `대비 ${stage.amount}`;
+    case "threshold":
+      return `임계값 ${stage.level}`;
+    case "saturate":
+      return `채도 ${stage.factor}`;
+    case "convolve":
+      return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+    case "flip":
+      return `뒤집기 ${stage.direction}`;
+    case "rotate":
+      return `회전 ${stage.rotation}도`;
+  }
+  // runStage와 이 함수는 같은 ExecutableStage 유니온 위에 서 있고 둘 다 default가 없다.
+  // 종류를 하나 더하면 두 함수가 함께 TS2366을 내므로, 설명 목록과 실행 목록이 갈라지지 않게
+  // 하는 것은 개발자의 규율이 아니라 반환 경로를 소진하는 타입 검사다.
+}
+
+// 이미 만들어진 스테이지 데이터만 읽으므로 디코딩·인코딩·픽셀 연산도, 실행 카운터 변경도 없다.
+function planPipeline(stages: readonly ExecutableStage[]): string[] {
+  return stages.map((stage, index) => `${index + 1}. ${describeExecutableStage(stage)}`);
+}
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -1531,6 +1564,17 @@ function main(): void {
     `반환 PNG 검증 ${verifiedPipelinePng.width}x${verifiedPipelinePng.height} ` +
       `bytes=${verifiedPipelinePng.data.length}`,
   );
+
+  // codeStep 451 — 실행 때 쓴 같은 다섯 스테이지를 계획기에 넘겨 두 경로의 카탈로그를 일치시킨다.
+  resetPipelineCounts();
+  const pipelinePlan = planPipeline(pipelineStages);
+  console.log(`실행 계획 ${pipelinePlan.join(" / ")}`);
+  // runPipeline은 애초에 파일을 쓰지 않고 바이트를 돌려주므로 ls로는 두 경로를 구분할 수 없다.
+  // 계획 호출 뒤에도 코덱 횟수가 0인 것이 디코딩·인코딩을 전혀 하지 않았다는 실행 시점 증거다.
+  console.log(`계획 실행 뒤 디코딩 ${decodeCount} / 인코딩 ${encodeCount}`);
+
+  writeFileSync(new URL("pipeline.png", OUT_DIR), pipelineBytes);
+  console.log("저장 out/pipeline.png");
 }
 
 main();
