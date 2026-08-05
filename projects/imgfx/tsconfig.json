@@ -1,5 +1,19 @@
 {
-  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정한다.
-  // 아직 배포하지 않는 프로젝트이므로 이 설정을 상속하는 것만으로 충분하다.
-  "extends": "../../tsconfig.json"
+  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정합니다.
+  // extends는 compilerOptions를 상속하므로 여기서 "types": ["node"]를 다시 적지 않아도 됩니다.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // 루트 설정은 저장소 전체 타입 게이트를 위해 출력 없이 검사만 합니다.
+    // imgfx 패키지는 dist를 만들어야 하므로 이 폴더에서만 출력을 다시 켭니다.
+    "noEmit": false,
+    // 컴파일된 .js 옆에 조건부 타입 계약을 담은 .d.ts를 함께 냅니다.
+    "declaration": true,
+    // 입력 루트를 src로 고정해야 dist 아래 출력 경로가 안정적으로 정해집니다.
+    "rootDir": "src",
+    // package.json의 main, types, bin이 모두 이 폴더 아래 파일을 가리킵니다.
+    "outDir": "dist"
+  },
+  // 관찰 스크립트와 컨슈머 검증 파일은 src 밖에 둡니다.
+  // 패키지 빌드에는 공개 소스와 CLI 소스만 들어가도록 src만 포함합니다.
+  "include": ["src"]
 }

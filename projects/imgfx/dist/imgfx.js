@@ -1,0 +1,856 @@
+// imgfx — 파이프라인이 주고받을 핵심 데이터 타입 ImageBuffer<Format>을 정의하고,
+// 포맷을 값이 아니라 팬텀 타입 매개변수로 들고 다니게 만든다.
+// 빌드: cd projects/imgfx && npx tsc -p .
+// 관찰: cd projects/imgfx && node observe.ts
+// 검사: npx tsc --noEmit
+//
+// 이 프로젝트가 완성될 때까지 지킬 세 가지 보장:
+// 1. 앞 스테이지의 출력 포맷과 뒤 스테이지의 입력 포맷이 어긋난 체인은 컴파일되지 않는다.
+// 2. 각 스테이지는 입력 버퍼를 제자리에서 바꾸지 않고 항상 새 버퍼를 반환한다.
+// 3. 파일 입출력은 한 계층에만 두며, 스테이지는 파일 시스템을 전혀 알지 못한다.
+// pngjs는 여전히 선언 파일 없이 순수 JavaScript로 배포되며, 타입은 빌드·검사에만 필요한
+// devDependencies의 @types/pngjs가 제공한다. 이제 png.width는 number, png.data는 Buffer로 잡히고,
+// colorType: 6도 0 | 2 | 4 | 6 중 하나로 검사된다.
+import { PNG } from "pngjs";
+import { readFileSync, writeFileSync } from "node:fs";
+export function makeImageBuffer(data, width, height) {
+    // __format이 옵셔널이라 값을 넣지 않아도 구조적으로 ImageBuffer를 만족한다.
+    // 포맷 정보는 런타임 객체를 더럽히지 않고 타입 검사에만 남는다.
+    // 숫자 리터럴을 넘기면 W와 H도 그 리터럴로 추론된다. 이렇게 얻은 ImageBuffer<F, 3, 2>는
+    // 너비·높이를 number로 받는 기존 ImageBuffer<F>에도 그대로 대입되므로 이전 호출부는 깨지지 않는다.
+    return { data, width, height };
+}
+export const rgba = makeImageBuffer(new Uint8ClampedArray(4), 1, 1);
+// 픽셀당 바이트 수는 호출자가 손으로 적지 않고 포맷 태그 하나에서만 유도한다.
+export const BYTES_PER_PIXEL = { RGBA8: 4, RGB8: 3, Gray8: 1 };
+export function bytesPerPixel(format) {
+    return BYTES_PER_PIXEL[format];
+}
+export const rgbaSize = bytesPerPixel("RGBA8"); // 타입은 number가 아니라 리터럴 4다.
+export const graySize = bytesPerPixel("Gray8"); // 타입은 number가 아니라 리터럴 1이다.
+export function requiresRgba(image) {
+    console.log(`requiresRgba ${image.width}x${image.height} bytes=${image.data.length}`);
+}
+export const gray = makeImageBuffer(new Uint8ClampedArray(1), 1, 1);
+// codeStep 452 — 두 호출은 원래 모듈 맨 위에서 곧바로 실행됐다. 이번 화에서 이 파일이 CLI가
+// 되면서 그럴 수 없게 됐다: 모듈을 불러오기만 해도 찍히므로 `imgfx.ts apply …`의 출력 앞에
+// 관계없는 두 줄이 섞인다. CLI는 자기 표준 출력을 온전히 가져야 하므로 관찰을 함수로 감싸
+// main()이 부르게 바꾼다. 인자 없이 실행할 때의 출력은 순서까지 그대로다.
+export function observePhantomMismatch() {
+    // 팬텀 필드는 런타임에 존재하지 않으므로 아래 두 호출 모두 실행 중에는 그냥 돌아간다.
+    // 실제로 찍히는 bytes= 값이 1과 4로 갈리는 것이 바로 타입이 막으려던 그 어긋남이다.
+    // @ts-expect-error — Format이 "Gray8"과 "RGBA8"로 갈려 구조적으로 더 이상 같지 않다
+    requiresRgba(gray);
+    requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
+}
+// 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
+export const INPUT_URL = new URL("../photo.png", import.meta.url);
+export const OUTPUT_URL = new URL("../copy.png", import.meta.url);
+// 3×3의 아홉 가중치는 허용 유니온의 9에 해당하므로 정상 커널 모양을 만족한다.
+export const boxKernel3x3 = {
+    weights: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+    side: 3,
+    divisor: 9,
+};
+// 잘못된 예제는 호출하지 않는 함수에 두어 런타임 출력은 늘리지 않고 타입 검사 증거만 남긴다.
+export function brokenKernelDemo() {
+    const brokenKernel = {
+        // @ts-expect-error — TS2353: 길이 8은 KernelLengthMismatch<8>이므로 weights 필드가 없다.
+        weights: [1, 2, 3, 4, 5, 6, 7, 8],
+        side: 3,
+        divisor: 8,
+    };
+    void brokenKernel;
+}
+// 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
+export function invertStage() {
+    return {
+        kind: "invert",
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => mapPixels(buf, "RGBA8", invertPixel),
+    };
+}
+// codeStep 434 — 그레이스케일 스테이지에 공유 순회로 이어지는 실행 함수를 얹는다.
+export function grayscaleStage() {
+    return {
+        kind: "grayscale",
+        in: "RGBA8",
+        out: "Gray8",
+        run: (buf) => mapPixels(buf, "Gray8", toGrayscale),
+    };
+}
+// codeStep 435 — 세 생성자도 각자의 커널을 공유 순회에 건네는 실행 함수를 돌려준다.
+export function brightnessStage(amount) {
+    // codeStep 452 — CLI가 먼저 검사하더라도 생성자는 CLI 밖의 코드에서도 직접 호출될 수 있다.
+    // 스테이지가 품을 값의 불변식은 가장 안쪽 경계인 생성자도 스스로 지켜야 한다.
+    if (!Number.isFinite(amount)) {
+        throw new Error(`brightness amount는 유한한 숫자여야 합니다: ${amount}`);
+    }
+    return {
+        kind: "brightness",
+        amount,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => mapPixels(buf, "RGBA8", brightnessKernel(amount)),
+    };
+}
+export function contrastStage(amount) {
+    // codeStep 452 — 호출 경로가 CLI인지와 상관없이 잘못된 스테이지가 만들어지지 않게 한다.
+    // 바깥 입력 검사는 친절한 오류를, 생성자 검사는 라이브러리 자체의 불변식을 책임진다.
+    if (!Number.isFinite(amount)) {
+        throw new Error(`contrast amount는 유한한 숫자여야 합니다: ${amount}`);
+    }
+    return {
+        kind: "contrast",
+        amount,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => mapPixels(buf, "RGBA8", contrastKernel(amount)),
+    };
+}
+// codeStep 437 — 임계값 스테이지도 커널을 공유 순회에 건네기만 한다.
+export function thresholdStage(level) {
+    // codeStep 439 — 잘못된 level은 스테이지 객체를 만들기 전에 거부한다.
+    // 그러면 유효하지 않은 스테이지가 파이프라인 계획에 들어갈 틈이 없다.
+    // NaN은 어떤 크기 비교에도 false를 돌려주므로 범위 검사만으로는 빠져나간다.
+    // 숫자인지부터 확인해야 "이 뒤로는 유효한 값뿐"이라는 약속이 실제로 성립한다.
+    if (!Number.isFinite(level) || level < 0 || level > 255) {
+        throw new Error(`threshold level은 0에서 255 사이의 숫자여야 합니다: ${level}`);
+    }
+    return {
+        kind: "threshold",
+        level,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => mapPixels(buf, "RGBA8", thresholdKernel(level)),
+    };
+}
+// codeStep 438 — 채도 스테이지는 factor를 품고 같은 mapPixels를 재사용한다.
+export function saturateStage(factor) {
+    // codeStep 439 — factor도 객체 생성 시점에 한 번 검사해 잘못된 계획을 일찍 막는다.
+    // 여기서도 NaN을 먼저 걸러야 아래 커널이 값을 믿고 계산만 할 수 있다.
+    if (!Number.isFinite(factor) || factor < 0) {
+        throw new Error(`saturate factor는 0 이상의 숫자여야 합니다: ${factor}`);
+    }
+    return {
+        kind: "saturate",
+        factor,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => mapPixels(buf, "RGBA8", saturateKernel(factor)),
+    };
+}
+// codeStep 443 — 박스 블러의 크기는 스테이지를 만드는 순간 검사해 잘못된 계획 생성을 막는다.
+export function boxBlurStage(size, edge = "clamp") {
+    // NaN과 Infinity는 정수·홀수 검사만 믿지 않고 Number.isFinite에서 먼저 거른다.
+    if (!Number.isFinite(size) || !Number.isInteger(size) || size < 1 || size % 2 === 0) {
+        throw new Error(`box blur size는 1 이상의 유한한 홀수 정수여야 합니다: ${size}`);
+    }
+    return {
+        kind: "convolve",
+        effect: "box",
+        side: size,
+        edge,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => boxBlurSeparable(buf, size, edge),
+    };
+}
+// codeStep 443 — 이름이 gaussianKernel ↔ gaussianBlurStage로 짝지어져 값과 스테이지를 구분한다.
+export function gaussianBlurStage(edge = "clamp") {
+    return {
+        kind: "convolve",
+        effect: "gaussian",
+        side: gaussianKernel.side,
+        edge,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => convolve(buf, gaussianKernel, edge),
+    };
+}
+// codeStep 443 — 샤픈도 같은 일반 순회를 쓰고 커널 값만 바꾸는 스테이지다.
+export function sharpenStage(edge = "clamp") {
+    return {
+        kind: "convolve",
+        effect: "sharpen",
+        side: sharpenKernel.side,
+        edge,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (buf) => convolve(buf, sharpenKernel, edge),
+    };
+}
+// codeStep 439 — 두 생성자가 실행보다 먼저 실패한다는 사실을 한 줄의 실행 결과로 관찰한다.
+export function rejectedStageDemo() {
+    const messages = [];
+    try {
+        thresholdStage(300);
+    }
+    catch (error) {
+        messages.push(error instanceof Error ? error.message : String(error));
+    }
+    try {
+        saturateStage(-1);
+    }
+    catch (error) {
+        messages.push(error instanceof Error ? error.message : String(error));
+    }
+    try {
+        // 명령줄 인자를 Number로 바꾸다 실패하면 예외가 아니라 NaN이 돌아온다.
+        // 크기 비교만으로 걸렀다면 이 값이 그대로 커널까지 흘러 들어갔을 자리다.
+        thresholdStage(Number("128px"));
+    }
+    catch (error) {
+        messages.push(error instanceof Error ? error.message : String(error));
+    }
+    // codeStep 443 — 컨볼루션 스테이지도 같은 규약을 따른다. 커널 크기는 홀수여야 중심이
+    // 하나로 정해지므로, 짝수 4는 이미지를 한 번도 읽기 전에 여기서 거부된다.
+    try {
+        boxBlurStage(4);
+    }
+    catch (error) {
+        messages.push(error instanceof Error ? error.message : String(error));
+    }
+    return messages.join(" / ");
+}
+// 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
+export const plan = [invertStage(), brightnessStage(20), grayscaleStage()];
+// codeStep 429 — 실행기는 kind를 기준으로 분기하고, never로 모든 종류를 처리했는지 검사한다.
+export function describeStage(stage) {
+    switch (stage.kind) {
+        case "invert":
+            return "반전";
+        case "grayscale":
+            return "그레이스케일";
+        case "brightness":
+            return `밝기 ${stage.amount}`;
+        case "contrast":
+            return `대비 ${stage.amount}`;
+        // codeStep 437 — AnyStage에 넣은 새 종류도 처리해 소진 검사를 다시 만족시킨다.
+        case "threshold":
+            return `임계값 ${stage.level}`;
+        // codeStep 438 — 채도도 factor까지 읽어 계획을 설명한다.
+        case "saturate":
+            return `채도 ${stage.factor}`;
+        // codeStep 443 — 실행기에게는 컨볼루션 하나이고, 효과와 크기는 스테이지 데이터가 설명한다.
+        case "convolve":
+            return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+        default: {
+            // 모든 case를 처리했다면 이 지점의 stage에는 가능한 값이 없어 never로 좁혀진다.
+            const exhaustive = stage;
+            throw new Error(`처리하지 않은 스테이지: ${JSON.stringify(exhaustive)}`);
+        }
+    }
+}
+export function flipStage(direction) {
+    return {
+        kind: "flip",
+        direction,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (source) => {
+            // 입력을 제자리에서 바꾸지 않는 저장소의 보장을 지키려고 결과 버퍼를 새로 만든다.
+            const out = new Uint8ClampedArray(source.data.length);
+            // 대상 좌표를 차례로 돌며, 그 자리에 들어올 원본 좌표만 방향에 따라 재배치한다.
+            for (let y = 0; y < source.height; y += 1) {
+                for (let x = 0; x < source.width; x += 1) {
+                    const [sourceX, sourceY] = remapCoord(x, y, source.width, source.height, direction);
+                    copyPixel(source, sourceX, sourceY, out, source.width, x, y);
+                }
+            }
+            return makeImageBuffer(out, source.width, source.height);
+        },
+    };
+}
+// 두 방향 생성자는 같은 flipStage 하나에 direction만 다르게 넘긴 결과다.
+export function flipHorizontalStage() {
+    return flipStage("horizontal");
+}
+export function flipVerticalStage() {
+    return flipStage("vertical");
+}
+// 새 스테이지를 유니온에 넣고도 실행기의 case를 추가하지 않은 순간을 컴파일되는 예제로 남긴다.
+export function describeStageMissingFlip(stage) {
+    switch (stage.kind) {
+        case "invert":
+            return "반전";
+        case "grayscale":
+            return "그레이스케일";
+        case "brightness":
+            return `밝기 ${stage.amount}`;
+        case "contrast":
+            return `대비 ${stage.amount}`;
+        // codeStep 437 — 여기서 빠뜨리는 종류는 계속 flip 하나뿐이어야 한다.
+        case "threshold":
+            return `임계값 ${stage.level}`;
+        // codeStep 438 — saturate까지 처리해야 default에 FlipStage만 남는다.
+        case "saturate":
+            return `채도 ${stage.factor}`;
+        // codeStep 443 — 여기까지 처리하면 의도대로 default에는 계속 FlipStage 하나만 남는다.
+        case "convolve":
+            return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+        default: {
+            // flip을 처리하지 않았으므로 여기의 stage는 FlipStage로 남아 never에 대입할 수 없다.
+            // @ts-expect-error — flip을 처리하지 않아 stage가 FlipStage로 남는다
+            const exhaustive = stage;
+            throw new Error(`처리하지 않은 스테이지: ${JSON.stringify(exhaustive)}`);
+        }
+    }
+}
+// flip case까지 추가하면 default에 남는 값이 다시 없어져 억제 주석 없이 검사를 통과한다.
+export function describeStageWithFlip(stage) {
+    switch (stage.kind) {
+        case "invert":
+            return "반전";
+        case "grayscale":
+            return "그레이스케일";
+        case "brightness":
+            return `밝기 ${stage.amount}`;
+        case "contrast":
+            return `대비 ${stage.amount}`;
+        // codeStep 437 — flip을 포함한 실행기도 임계값 스테이지를 빠짐없이 설명한다.
+        case "threshold":
+            return `임계값 ${stage.level}`;
+        // codeStep 438 — 모든 종류를 처리해야 default가 다시 never로 좁혀진다.
+        case "saturate":
+            return `채도 ${stage.factor}`;
+        // codeStep 443 — flip을 아는 실행기도 새 컨볼루션 종류를 빠뜨리지 않는다.
+        case "convolve":
+            return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+        case "flip":
+            return `뒤집기 ${stage.direction}`;
+        default: {
+            // 스테이지 종류를 늘리면 실행기가 컴파일 단계에서 먼저 깨진다.
+            // 이것이 닫힌 판별 유니온 하나로 스테이지 목록을 모아 둔 핵심 이유다.
+            const exhaustive = stage;
+            throw new Error(`처리하지 않은 스테이지: ${JSON.stringify(exhaustive)}`);
+        }
+    }
+}
+// codeStep 430 — pipeline의 인자를 최소 한 개 이상의 스테이지를 담는 가변 인자 튜플로 받는다.
+// 배열 타입으로 뭉개지지 않으므로 Stages는 [InvertStage, GrayscaleStage]처럼
+// 호출 위치마다 각 원소의 타입과 순서를 그대로 보존해 추론된다.
+export function pipeline(...stages) {
+    const first = stages[0];
+    const last = stages[stages.length - 1];
+    // 런타임에서는 첫 입력과 마지막 출력이 분명하지만, 컴파일러는 이 객체가 재귀 조건부 타입의
+    // 성공 분기를 만족한다는 사실까지 구조적으로 증명할 수 없다. 구현 경계에서 그 간극만 단언한다.
+    return { in: first.in, out: last.out };
+}
+// Stages는 [InvertStage, GrayscaleStage] 튜플로 추론된다.
+export const previewPipeline = pipeline(invertStage(), grayscaleStage());
+// plan은 readonly AnyStage[]라서 원소별 위치 정보와 "최소 한 개"라는 보장을 잃었다.
+// 호출하지 않는 데모 안에 두어 런타임에는 영향을 주지 않되, 배열 spread의 실패는 계속 검사한다.
+export function spreadPlanArrayDemo() {
+    // @ts-expect-error — TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+    pipeline(...plan);
+}
+// run은 구체적인 스테이지 목록을 알 필요 없이, 검사를 통과해 in과 out을 가진 결과만 받는다.
+export function run(p) {
+    console.log(`파이프라인: ${p.in} -> ${p.out}`);
+}
+// 잘못 연결한 체인의 진단도 컴파일되는 교육용 증거로 남기되, 호출하지 않아 출력은 더럽히지 않는다.
+export function brokenPipelineDemo() {
+    // TS2739: Type 'PipelineMismatch<"Gray8", BrightnessStage>' is missing the following properties from type 'RunnablePipeline<PixelFormat, PixelFormat>': in, out
+    // @ts-expect-error — 포맷이 어긋난 결과에는 RunnablePipeline이 요구하는 in과 out이 없다.
+    run(pipeline(grayscaleStage(), brightnessStage(20)));
+}
+export function mapPixels(source, outFormat, kernel) {
+    // codeStep 439 — 효과 매개변수는 스테이지 생성자가 이미 한 번 검사했다.
+    // 모든 픽셀이 지나는 공유 순회에서는 같은 범위 검사를 반복하지 않는다.
+    const pixelCount = source.width * source.height;
+    // In은 런타임에 지워지는 팬텀 타입이라 bytesPerPixel에 넘길 포맷 값이 없다.
+    // 그래서 입력 한 픽셀의 바이트 수는 버퍼 전체 길이를 픽셀 수로 나누어 되찾는다.
+    // 출력 포맷은 실제 인자로 받았으므로 기존 bytesPerPixel을 그대로 사용할 수 있다.
+    const inBytes = source.data.length / pixelCount;
+    const outBytes = bytesPerPixel(outFormat);
+    const out = new Uint8ClampedArray(pixelCount * outBytes);
+    for (let i = 0; i < pixelCount; i += 1) {
+        const start = i * inBytes;
+        // In이 아직 미해결인 제네릭이라 Pixel<In>의 후보 튜플 길이가 충돌해 never로 줄어든다.
+        // 이 구현 경계에서만 unknown을 거치는 이중 단언으로, 실제 버퍼에서 자른 한 픽셀임을 알려 준다.
+        const pixel = Array.from(source.data.slice(start, start + inBytes));
+        // readonly 튜플도 ArrayLike<number>를 만족하므로 set에는 별도 단언이 필요 없다.
+        // Uint8ClampedArray에 쓰는 순간 범위를 벗어난 채널 값도 자동으로 0~255에 맞춰진다.
+        out.set(kernel(pixel), i * outBytes);
+    }
+    // 픽셀 포맷과 데이터 길이는 달라져도 이미지의 공간 크기는 그대로 보존한다.
+    return makeImageBuffer(out, source.width, source.height);
+}
+// codeStep 437 — 그레이스케일과 임계값이 같은 밝기 정의를 공유하도록 계산을 한곳에 모은다.
+export function luma(r, g, b) {
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+export const toGrayscale = ([r, g, b]) => [
+    // Gray8 채널 하나로 저장하는 그레이스케일만 여기서 밝기를 정수로 반올림한다.
+    Math.round(luma(r, g, b)),
+];
+// run을 얹어도 describeStage의 소진 검사와 CheckAdjacent/pipeline의 포맷 검사는 그대로 동작한다.
+// 그 타입들은 스테이지의 kind·in·out만 읽고, 새 함수 프로퍼티의 구체적인 내용에는 의존하지 않는다.
+// 또한 JSON.stringify는 함수 값 프로퍼티를 생략하므로 기존 plan 출력도 한 글자도 달라지지 않는다.
+// codeStep 435 — 출력 포맷은 그대로 두고 채널 값만 바꾸는 세 커널을 더한다.
+// 그레이스케일만 출력 포맷이 Gray8로 바뀌므로 변환을 드러내는 toGrayscale이라는 이름을 쓴다.
+// 나머지는 커널과 스테이지 생성자를 눈으로 구분할 수 있게 Pixel/Kernel 접미사를 붙인다.
+export const invertPixel = ([r, g, b, a]) => [
+    255 - r,
+    255 - g,
+    255 - b,
+    a,
+];
+// 밝기와 대비는 스테이지의 amount마다 다른 커널을 만들어야 하므로 커널 팩토리로 표현한다.
+export const brightnessKernel = (delta) => ([r, g, b, a]) => [r + delta, g + delta, b + delta, a];
+export const contrastKernel = (factor) => ([r, g, b, a]) => [
+    (r - 128) * factor + 128,
+    (g - 128) * factor + 128,
+    (b - 128) * factor + 128,
+    a,
+];
+// codeStep 437 — 밝기가 level 이상이면 흰색, 미만이면 검은색으로 가르되 알파는 보존한다.
+// codeStep 439 — level은 thresholdStage가 이미 검사하므로 커널은 픽셀마다 다시 검사하지 않는다.
+export const thresholdKernel = (level) => ([r, g, b, a]) => {
+    const channel = luma(r, g, b) >= level ? 255 : 0;
+    return [channel, channel, channel, a];
+};
+// codeStep 438 — 원래 채널과 회색 사이의 거리를 factor만큼 벌려 채도를 조절한다.
+// factor 0은 그레이스케일, 1은 원본, 1보다 크면 색 차이가 더 벌어져 색이 진해진다.
+// codeStep 439 — factor 역시 saturateStage가 한 번 검사했으므로 커널에서는 계산만 한다.
+export const saturateKernel = (factor) => ([r, g, b, a]) => {
+    const gray = luma(r, g, b);
+    return [
+        gray + (r - gray) * factor,
+        gray + (g - gray) * factor,
+        gray + (b - gray) * factor,
+        a,
+    ];
+};
+// Stage<Kind, In, Out>은 픽셀 포맷만 표현하고 크기 W·H는 표현하지 못한다. 따라서 유니온에
+// 들어온 회전 결과는 ImageBuffer<"RGBA8">, 즉 W = H = number로 뭉개져 크기 교환 정보가 사라진다.
+// 크기를 타입에 남기려면 rotate90·rotate180·rotate270을 직접 부르고, 실행기 체인에 넣을 때는
+// 그 정보를 포기한다. 정밀한 크기 API와 공통 실행기 API가 함께 존재하는 이유가 이 차이다.
+// codeStep 451 — ep_445의 describeStageWithFlip은 AnyStageWithFlip용 소진 검사 스냅샷으로
+// 얼어붙어 있고 유니온도 다르므로 재사용하지 않고, 회전까지 아는 새 설명기를 만든다.
+export function describeExecutableStage(stage) {
+    switch (stage.kind) {
+        case "invert":
+            return "반전";
+        case "grayscale":
+            return "그레이스케일";
+        case "brightness":
+            return `밝기 ${stage.amount}`;
+        case "contrast":
+            return `대비 ${stage.amount}`;
+        case "threshold":
+            return `임계값 ${stage.level}`;
+        case "saturate":
+            return `채도 ${stage.factor}`;
+        case "convolve":
+            return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
+        case "flip":
+            return `뒤집기 ${stage.direction}`;
+        case "rotate":
+            return `회전 ${stage.rotation}도`;
+    }
+    // runStage와 이 함수는 같은 ExecutableStage 유니온 위에 서 있고 둘 다 default가 없다.
+    // 종류를 하나 더하면 두 함수가 함께 TS2366을 내므로, 설명 목록과 실행 목록이 갈라지지 않게
+    // 하는 것은 개발자의 규율이 아니라 반환 경로를 소진하는 타입 검사다.
+}
+// 이미 만들어진 스테이지 데이터만 읽으므로 디코딩·인코딩·픽셀 연산도, 실행 카운터 변경도 없다.
+export function planPipeline(stages) {
+    return stages.map((stage, index) => `${index + 1}. ${describeExecutableStage(stage)}`);
+}
+export function resolveAxisCoord(v, limit, policy) {
+    switch (policy) {
+        case "clamp":
+            return Math.max(0, Math.min(limit - 1, v));
+        case "wrap":
+            // 나머지를 한 번 더 보정하면 음수나 폭보다 훨씬 큰 좌표도 항상 0 이상으로 돌아온다.
+            return ((v % limit) + limit) % limit;
+        case "mirror": {
+            // 길이가 1이면 대칭시킬 안쪽 픽셀이 없으므로 유일한 좌표 0만 돌려준다.
+            if (limit === 1) {
+                return 0;
+            }
+            // 가장자리 픽셀을 겹쳐 쓰지 않는 mirror의 한 주기는 0…끝…0까지인 2×(limit-1)이다.
+            // 주기 안으로 먼저 접은 뒤 후반부를 다시 뒤집으므로 아무리 먼 좌표도 반복 대칭된다.
+            const period = 2 * (limit - 1);
+            const folded = ((v % period) + period) % period;
+            return folded < limit ? folded : period - folded;
+        }
+        default: {
+            // 유니온에 네 번째 정책을 더하면 여기서 컴파일이 먼저 깨진다. 값만 늘리고 처리를
+            // 빠뜨리는 일을 타입 검사기가 막아 주므로, 정책이 늘어도 이 함수는 조용히 틀리지 않는다.
+            const exhaustive = policy;
+            throw new Error(`처리하지 않은 가장자리 정책: ${String(exhaustive)}`);
+        }
+    }
+}
+export function clampCoord(x, y, width, height, policy) {
+    return [resolveAxisCoord(x, width, policy), resolveAxisCoord(y, height, policy)];
+}
+export function remapCoord(x, y, width, height, direction) {
+    switch (direction) {
+        case "horizontal":
+            return [width - 1 - x, y];
+        case "vertical":
+            return [x, height - 1 - y];
+        default: {
+            // 방향을 추가하고 좌표 계산을 빠뜨리면 이 소진 검사에서 컴파일이 먼저 깨진다.
+            const exhaustive = direction;
+            throw new Error(`처리하지 않은 플립 방향: ${String(exhaustive)}`);
+        }
+    }
+}
+// 결과의 (ox, oy)가 값을 가져올 원본 좌표를 반환한다. 정방향으로 픽셀을 밀지 않고
+// 역좌표를 구하면 결과 배열을 빈틈이나 중복 없이 행 우선 순서로 한 번만 채울 수 있다.
+export function rotateCoord(ox, oy, sourceWidth, sourceHeight, rotation) {
+    switch (rotation) {
+        case "90":
+            return [oy, sourceHeight - 1 - ox];
+        case "180":
+            return [sourceWidth - 1 - ox, sourceHeight - 1 - oy];
+        case "270":
+            return [sourceWidth - 1 - oy, ox];
+        default: {
+            // 각도를 추가하고 역좌표 계산을 빠뜨리면 이 소진 검사에서 컴파일이 먼저 깨진다.
+            const exhaustive = rotation;
+            throw new Error(`처리하지 않은 회전 각도: ${String(exhaustive)}`);
+        }
+    }
+}
+// codeStep 444 — 2차원 좌표를 평탄한 배열의 바이트 오프셋으로 바꾸는 유일한 자리다.
+// 지금까지 이 식은 readPixel과 두 컨볼루션 순회에 따로따로 적혀 있었다. 픽셀을 옮기는 일이
+// 곧 이 오프셋을 다시 계산하는 일이므로, 자리를 옮기기 전에 계산식부터 한곳으로 모은다.
+// RGBA8 경로에서만 쓰이므로 픽셀당 바이트 수는 4로 고정이다.
+export function pixelIndex(width, x, y) {
+    return (y * width + x) * 4;
+}
+export function readPixel(buf, x, y) {
+    const index = pixelIndex(buf.width, x, y);
+    return [buf.data[index], buf.data[index + 1], buf.data[index + 2], buf.data[index + 3]];
+}
+export function copyPixel(source, sourceX, sourceY, target, targetWidth, targetX, targetY) {
+    const pixel = readPixel(source, sourceX, sourceY);
+    // 읽을 때와 쓸 때 모두 같은 pixelIndex를 지난다. 두 자리에서 오프셋 계산이 어긋날 수 없다.
+    // 회전은 원본의 높이가 대상의 너비가 되므로, 쓰기 오프셋은 원본 너비에 기대지 않고
+    // 호출자가 넘긴 대상 너비로 계산한다. 플립은 두 너비가 같아 기존 동작을 그대로 유지한다.
+    target.set(pixel, pixelIndex(targetWidth, targetX, targetY));
+}
+// codeStep 448 — 세 각도의 실제 픽셀 순회는 이 코어 하나만 맡는다. 180도만 크기를 유지하고
+// 90·270도는 너비와 높이를 맞바꾸지만, 어느 경우든 결과 좌표에서 원본 좌표를 찾는 흐름은 같다.
+// pixelIndex가 픽셀당 4바이트를 전제로 하므로 포맷은 제네릭으로 열지 않고 RGBA8로 고정한다.
+// Gray8 같은 포맷까지 허용하면 타입은 통과해도 좌표별 바이트 오프셋이 조용히 틀어질 수 있다.
+export function rotatePixels(buf, rotation) {
+    const swapsDimensions = rotation !== "180";
+    const outWidth = swapsDimensions ? buf.height : buf.width;
+    const outHeight = swapsDimensions ? buf.width : buf.height;
+    const out = new Uint8ClampedArray(buf.data.length);
+    // 결과 좌표를 차례로 돌며 그 자리에 들어올 원본 좌표를 역으로 찾는다. 각도별 공식은
+    // rotateCoord 한곳에만 있어, 세 공개 함수가 같은 이중 루프를 복사하지 않는다.
+    for (let oy = 0; oy < outHeight; oy += 1) {
+        for (let ox = 0; ox < outWidth; ox += 1) {
+            const [sourceX, sourceY] = rotateCoord(ox, oy, buf.width, buf.height, rotation);
+            copyPixel(buf, sourceX, sourceY, out, outWidth, ox, oy);
+        }
+    }
+    return out;
+}
+// codeStep 446 — 90도 회전은 픽셀 포맷과 바이트 수를 보존하지만 너비와 높이를 맞바꾼다.
+// 스테이지 유니온에는 넣지 않고 평범한 함수로 두어, 크기를 보존하는 플립과 역할을 구분한다.
+// codeStep 447 — 입력의 W·H를 결과의 H·W로 놓아 런타임의 크기 교환을 타입에도 그대로 기록한다.
+export function rotate90(buf) {
+    // buf.height는 H, buf.width는 W이므로 이 순서로 makeImageBuffer에 넘기면 반환 타입도
+    // ImageBuffer<"RGBA8", H, W>로 추론된다.
+    return makeImageBuffer(rotatePixels(buf, "90"), buf.height, buf.width);
+}
+// codeStep 448 — 270도도 직사각형의 두 축을 맞바꾸므로 90도와 같은 H·W 반환 타입을 가진다.
+export function rotate270(buf) {
+    return makeImageBuffer(rotatePixels(buf, "270"), buf.height, buf.width);
+}
+// 180도는 두 축을 뒤집어도 각 축의 길이는 그대로다. 반환 타입에서도 W·H의 자리를 보존한다.
+export function rotate180(buf) {
+    return makeImageBuffer(rotatePixels(buf, "180"), buf.width, buf.height);
+}
+// codeStep 449 — 실행기용 회전은 각도를 데이터로 들고 다니며, 실행할 때도 기존 회전 코어를 쓴다.
+export function rotateStage(rotation) {
+    return {
+        kind: "rotate",
+        rotation,
+        in: "RGBA8",
+        out: "RGBA8",
+        run: (source) => {
+            const swapsDimensions = rotation !== "180";
+            return makeImageBuffer(rotatePixels(source, rotation), swapsDimensions ? source.height : source.width, swapsDimensions ? source.width : source.height);
+        },
+    };
+}
+// 스테이지가 run을 들고 있어 어떤 함수를 부를지는 데이터가 이미 정해 두었다. 그래도 kind로
+// 가르는 까닭은 실행 전에 알아야 하는 것이 run 바깥에 있기 때문이다 — 이 스테이지가 이웃을
+// 읽어서 제자리 계산이 불가능한가. 픽셀 단위·이웃 읽기·좌표 재배치라는 세 묶음은 실행 준비가
+// 달라지는 이유를 그대로 드러낸다.
+export function runStage(source, stage) {
+    switch (stage.kind) {
+        // 픽셀 하나만 읽어 픽셀 하나를 쓰는 커널 계열은 자기 자리만 보므로 이웃을 읽지 않는다.
+        case "invert":
+        case "grayscale":
+        case "brightness":
+        case "contrast":
+        case "threshold":
+        case "saturate":
+            return { image: stage.run(source), readsNeighbors: false };
+        // 컨볼루션만 이웃을 읽는다. 그래서 제자리에서 고치면 아직 읽지 않은 이웃이 오염된다
+        // (codeStep 443의 inPlaceCorruptionDemo가 그 오염을 5×1 버퍼로 보여 주었다). 그중 분리
+        // 순회로 도는 박스 블러는 중간값을 반올림하지 않으려고 Float64Array 스크래치까지 두 개 잡고,
+        // 가우시안·샤픈은 일반 순회라 출력 배열 하나만 만든다 — 이 분류는 거기까지 가르지 않는다.
+        case "convolve":
+            return { image: stage.run(source), readsNeighbors: true };
+        // 값은 그대로 두고 자리만 옮기는 좌표 재배치 계열이다.
+        case "flip":
+        case "rotate":
+            return { image: stage.run(source), readsNeighbors: false };
+    }
+    // default를 두지 않은 것이 곧 소진 검사다. StageRun에는 undefined가 없으므로 유니온에 종류를
+    // 더하고 case를 빠뜨리면 반환하지 않는 경로가 생겨 TS2366으로 컴파일이 먼저 깨진다.
+    // default의 never로 검사하는 describeStage와 결과는 같지만, 여기서는 억제 주석 없이 스위치
+    // 자체가 닫혀 있어야 한다. case 하나를 지우고 npx tsc --noEmit을 실행하면 차이를 볼 수 있다.
+    // 반환 이미지를 PixelFormat으로 넓히는 이유는 grayscale만 Gray8을 내놓기 때문이다. 그래서 이
+    // 함수는 다음 스테이지가 그 포맷을 받을 수 있는지까지는 말해 주지 않는다 — 앞뒤를 맞물리게 하는
+    // 일은 목록을 만드는 쪽의 몫으로 남는다.
+}
+// codeStep 450 — 코덱 호출을 파이프라인의 바이트 경계 한곳에 모아 PNG는 시작과 끝에서만 만진다.
+// 모든 스테이지가 새 이미지 배열을 반환하므로 실행 중에는 입력과 출력이 함께 있다가, 다음
+// 단계로 넘어가면 앞 버퍼가 쓰레기가 된다. 이웃을 읽는 컨볼루션은 그 위에 중간 버퍼를 더 잡는다
+// (분리 순회로 도는 박스 블러는 Float64Array 스크래치를 가로·세로 두 개).
+// runStage가 돌려준 메타데이터를 세어 그런 스테이지가 체인에 몇 개였는지 실행 결과로 남긴다.
+export let decodeCount = 0;
+export let encodeCount = 0;
+export let neighborStageCount = 0;
+export function resetPipelineCounts() {
+    decodeCount = 0;
+    encodeCount = 0;
+    neighborStageCount = 0;
+}
+export function runPipeline(pngBytes, stages) {
+    decodeCount += 1;
+    const decoded = PNG.sync.read(pngBytes);
+    let current = makeImageBuffer(new Uint8ClampedArray(decoded.data), decoded.width, decoded.height);
+    let currentFormat = "RGBA8";
+    // codeStep 454 — 튜플로 받는 pipeline()은 CheckAdjacent로 인접 포맷을 컴파일 시점에 막는다.
+    // 반면 이 실행기가 받는 배열은 명령줄 문자열에서 동적으로 만들어져 원소 순서를 컴파일 시점에
+    // 알 수 없다. 그래서 같은 규칙을 실행 시점에 검사한다. 이 목록이 문자열에서 만들어지는 한
+    // 검사를 컴파일 시점으로 되돌릴 수 없으며, 아래 단언은 바로 앞의 포맷 검사로 뒷받침된다.
+    for (const [index, stage] of stages.entries()) {
+        if (currentFormat !== stage.in) {
+            throw new Error(`체인의 ${index + 1}번째 스테이지(${stage.kind})에서 실패했습니다: ` +
+                `앞 단계가 ${currentFormat} 이미지를 넘겼는데 ${stage.in} 이미지를 기대합니다`);
+        }
+        let result;
+        try {
+            result = runStage(current, stage);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`체인의 ${index + 1}번째 스테이지(${stage.kind})에서 실패했습니다: ${message}`);
+        }
+        if (result.readsNeighbors) {
+            neighborStageCount += 1;
+        }
+        current = result.image;
+        currentFormat = stage.out;
+    }
+    // colorType 6은 픽셀마다 네 바이트를 읽는다. Gray8의 한 바이트 배열을 그대로 건네면
+    // 손상된 PNG가 생기므로, 인접성이 모두 맞아도 마지막 출력 포맷은 별도로 확인해야 한다.
+    if (currentFormat !== "RGBA8") {
+        throw new Error(`체인의 마지막 출력이 ${currentFormat}입니다. PNG로 인코딩하려면 RGBA8로 끝나야 합니다`);
+    }
+    // 회전은 두 축을 맞바꾸므로 원본이 아니라 마지막 버퍼의 크기로 PNG를 만들어야 한다.
+    const png = new PNG({ width: current.width, height: current.height, colorType: 6 });
+    png.data.set(current.data);
+    encodeCount += 1;
+    return PNG.sync.write(png, { colorType: 6 });
+}
+// codeStep 454 — 실행 시점 포맷 검사가 실패 위치와 마지막 출력 문제를 각각 설명하는지
+// 실제 PNG 바이트로 확인한다. 예외 자체를 흘리지 않고 메시지만 모아 관찰 출력 한 줄에 보탠다.
+export function rejectedPipelineFormatDemo(pngBytes) {
+    const messages = [];
+    const chains = [
+        [grayscaleStage(), invertStage()],
+        [grayscaleStage()],
+    ];
+    for (const stages of chains) {
+        try {
+            runPipeline(pngBytes, stages);
+        }
+        catch (error) {
+            messages.push(error instanceof Error ? error.message : String(error));
+        }
+    }
+    return messages.join(" / ");
+}
+// convolve 하나를 빠뜨리면 반환 경로 검사가 실제로 실패한다는 컴파일되는 증거다.
+export function runStageMissingConvolve(source, stage) {
+    switch (stage.kind) {
+        case "invert":
+        case "grayscale":
+        case "brightness":
+        case "contrast":
+        case "threshold":
+        case "saturate":
+            return { image: stage.run(source), readsNeighbors: false };
+        case "flip":
+        case "rotate":
+            return { image: stage.run(source), readsNeighbors: false };
+    }
+}
+export function sampleEdge(buf, x, y, policy) {
+    const [sampleX, sampleY] = clampCoord(x, y, buf.width, buf.height, policy);
+    return readPixel(buf, sampleX, sampleY);
+}
+// 직접 순회와 분리 순회가 실제로 가중치 곱셈을 몇 번 수행했는지 같은 카운터로 비교한다.
+export let multiplyCount = 0;
+export function resetMultiplyCount() {
+    multiplyCount = 0;
+}
+export function convolve1D(source, size, axis, edge = "clamp") {
+    const out = new Float64Array(source.data.length);
+    const radius = Math.floor(size / 2);
+    // 박스 블러의 1차원 커널은 모든 자리의 무게가 같다. 평균을 뒤로 미루지 않고 가중치 자체에
+    // 담아 두면 아래 곱셈 한 번이 곧 가중치 곱셈 한 번이라, 세는 횟수가 실제 연산과 일치한다.
+    const weights = new Array(size).fill(1 / size);
+    for (let y = 0; y < source.height; y += 1) {
+        for (let x = 0; x < source.width; x += 1) {
+            for (let channel = 0; channel < 4; channel += 1) {
+                let sum = 0;
+                for (let tap = 0; tap < size; tap += 1) {
+                    const offset = tap - radius;
+                    const rawX = axis === "row" ? x + offset : x;
+                    const rawY = axis === "column" ? y + offset : y;
+                    // 정책 유니온이 한 축의 좌표를 결정하므로 같은 순회가 clamp·wrap·mirror를 모두 쓴다.
+                    const sampleX = resolveAxisCoord(rawX, source.width, edge);
+                    const sampleY = resolveAxisCoord(rawY, source.height, edge);
+                    const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
+                    sum += source.data[sampleIndex] * weights[tap];
+                    multiplyCount += 1;
+                }
+                out[pixelIndex(source.width, x, y) + channel] = sum;
+            }
+        }
+    }
+    return { data: out, width: source.width, height: source.height };
+}
+export function scratchToImage(scratch) {
+    // Float64Array를 최종 배열 생성자에 건네는 이 지점에서 처음이자 마지막 반올림·클램핑이 일어난다.
+    return makeImageBuffer(new Uint8ClampedArray(scratch.data), scratch.width, scratch.height);
+}
+// codeStep 441 — 5×5 박스 커널의 스물다섯 자리도 홀수의 제곱이라 Kernel 검사를 그대로 통과한다.
+// 가중치가 모두 1이고 divisor가 25이므로, 이 커널을 한 번에 적용하는 것이 곧 5×5 평균이다.
+export const boxKernel5x5 = {
+    weights: [
+        1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1,
+    ],
+    side: 5,
+    divisor: 25,
+};
+// codeStep 441 — 검사를 통과한 정사각 커널을 각 픽셀 중앙에 놓고 한 번에 적용하는 일반 순회다.
+// 분리 경로와 곱셈 횟수를 대조하려고 여기서 먼저 만들고, 뒤에서 가우시안·샤픈이 그대로 재사용한다.
+export function convolve(source, kernel, edge = "clamp") {
+    const out = new Uint8ClampedArray(source.data.length);
+    const radius = Math.floor(kernel.side / 2);
+    for (let y = 0; y < source.height; y += 1) {
+        for (let x = 0; x < source.width; x += 1) {
+            for (let channel = 0; channel < 4; channel += 1) {
+                let sum = 0;
+                for (let kernelY = 0; kernelY < kernel.side; kernelY += 1) {
+                    for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
+                        const sampleX = resolveAxisCoord(x + kernelX - radius, source.width, edge);
+                        const sampleY = resolveAxisCoord(y + kernelY - radius, source.height, edge);
+                        const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
+                        const weightIndex = kernelY * kernel.side + kernelX;
+                        sum += source.data[sampleIndex] * kernel.weights[weightIndex];
+                        multiplyCount += 1;
+                    }
+                }
+                // 실수 누적값을 모두 구한 뒤 Uint8ClampedArray에 쓰는 이 순간 한 번만 반올림·클램핑한다.
+                out[pixelIndex(source.width, x, y) + channel] = sum / kernel.divisor;
+            }
+        }
+    }
+    return makeImageBuffer(out, source.width, source.height);
+}
+export function boxBlurSeparable(buf, size, edge = "clamp") {
+    const rows = convolve1D(buf, size, "row", edge);
+    const columns = convolve1D(rows, size, "column", edge);
+    return scratchToImage(columns);
+}
+export function maxChannelDifference(a, b) {
+    let maxDifference = 0;
+    for (let i = 0; i < a.data.length; i += 1) {
+        maxDifference = Math.max(maxDifference, Math.abs(a.data[i] - b.data[i]));
+    }
+    return maxDifference;
+}
+// codeStep 443 — 정수 리터럴 가중치를 그대로 두어 Kernel의 튜플 길이 검사를 보존한다.
+// 1+2+1+2+4+2+1+2+1은 16이므로 마지막에 divisor 16으로 나누면 밝기 총량이 유지된다.
+export const gaussianKernel = {
+    weights: [1, 2, 1, 2, 4, 2, 1, 2, 1],
+    side: 3,
+    divisor: 16,
+};
+// codeStep 443 — 샤픈 가중치 합은 1이라 이웃과의 차이를 키워도 전체 밝기 총량은 보존된다.
+export const sharpenKernel = {
+    weights: [0, -1, 0, -1, 5, -1, 0, -1, 0],
+    side: 3,
+    divisor: 1,
+};
+// codeStep 443 — 아직 읽지 않은 이웃을 덮어쓰면 순회 뒤쪽 결과가 오염됨을 5×1 버퍼로 보인다.
+export function inPlaceCorruptionDemo() {
+    const data = new Uint8ClampedArray(5 * 4);
+    for (let x = 0; x < 5; x += 1) {
+        data[x * 4 + 3] = 255;
+    }
+    data[2 * 4] = 255;
+    const source = makeImageBuffer(data, 5, 1);
+    const correct = boxBlurSeparable(source, 3);
+    const correctRed = Array.from({ length: 5 }, (_, x) => correct.data[x * 4]);
+    // 잘못된 경로는 별도 출력 배열 없이 왼쪽부터 원본 빨강 채널 자리에 평균을 즉시 쓴다.
+    // x=2부터는 왼쪽 이웃의 원래 0 대신 앞 순회가 써 버린 85를 읽어 113,38,13으로 번진다.
+    const corrupted = new Uint8ClampedArray(source.data);
+    for (let x = 0; x < 5; x += 1) {
+        let sum = 0;
+        for (let offset = -1; offset <= 1; offset += 1) {
+            const sampleX = resolveAxisCoord(x + offset, 5, "clamp");
+            sum += corrupted[sampleX * 4];
+        }
+        corrupted[x * 4] = sum / 3;
+    }
+    const corruptedRed = Array.from({ length: 5 }, (_, x) => corrupted[x * 4]);
+    return `정상 ${correctRed.join(",")} / 오염 ${corruptedRed.join(",")}`;
+}
+// codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
+export function clampingContrast() {
+    const clamped = new Uint8ClampedArray(2);
+    const wrapped = new Uint8Array(2);
+    // Clamped 배열은 이미지 채널에 알맞게 0~255로 자르고, 일반 Uint8 배열은 256을 기준으로 감싼다.
+    clamped[0] = 280;
+    clamped[1] = -20;
+    wrapped[0] = 280;
+    wrapped[1] = -20;
+    return (`Uint8ClampedArray 280→${clamped[0]}, -20→${clamped[1]} / ` +
+        `Uint8Array 280→${wrapped[0]}, -20→${wrapped[1]}`);
+}
+export function readPng(path) {
+    const png = PNG.sync.read(readFileSync(path));
+    // colorType 6, 비트 깊이 8의 RGBA 레이아웃이므로 바이트 수는 정확히 폭 × 높이 × 4다.
+    console.log(`width=${png.width} height=${png.height} bytes=${png.data.length}`);
+    return png;
+}
+export function writePng(path, width, height, data) {
+    // 읽어서 얻은 RGBA 버퍼와 쓰는 PNG를 모두 colorType 6으로 맞춰 픽셀당 네 바이트를 유지한다.
+    const png = new PNG({ width, height, colorType: 6 });
+    png.data.set(data);
+    writeFileSync(path, PNG.sync.write(png, { colorType: 6 }));
+}
