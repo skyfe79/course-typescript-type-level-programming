@@ -43,6 +43,7 @@ export const BUILTIN_SIGNATURES: Readonly<Record<BuiltinName, BuiltinSignature>>
   input: { params: ["string"], returnType: "string" },
   toNumber: { params: ["string"], returnType: "number" },
   random: { params: ["number"], returnType: "number" },
+  toString: { params: ["any"], returnType: "string" },
 };
 
 export type FunctionSignature = {
@@ -145,7 +146,24 @@ function checkBinary(
   if (!right.ok) return right;
 
   switch (operator) {
-    case "+":
+    case "+": {
+      // 덧셈과 이어 붙이기는 같은 기호를 쓰지만 결과 타입까지 피연산자 타입을 따른다.
+      // 서로 다른 타입을 자바스크립트처럼 조용히 문자열로 바꾸지 않아, toString을 쓴
+      // 명시적 변환만 허용한다. void는 어느 쌍에도 해당하지 않아 같은 진단으로 거절된다.
+      if (left.type === "number" && right.type === "number") {
+        return { ok: true, type: "number" };
+      }
+      if (left.type === "string" && right.type === "string") {
+        return { ok: true, type: "string" };
+      }
+      return {
+        ok: false,
+        diagnostics: [typeError(
+          `'+'의 피연산자는 모두 number이거나 모두 string이어야 합니다 (현재 ${left.type}, ${right.type})`,
+        )],
+      };
+    }
+
     case "-":
     case "*":
     case "/":
