@@ -18,21 +18,34 @@ import { readFileSync, writeFileSync } from "node:fs";
 // 각 태그는 지난 시간에 고정한 PNG colorType과 정확히 하나씩 짝지어진다: RGBA8→6, RGB8→2, Gray8→0.
 type PixelFormat = "RGBA8" | "RGB8" | "Gray8";
 
-interface ImageBuffer<Format extends PixelFormat> {
+// codeStep 447 — 픽셀 포맷뿐 아니라 너비와 높이도 타입 매개변수로 들고 다닌다.
+// 기본값을 number로 두었으므로 기존의 ImageBuffer<"RGBA8"> 표기는 그대로 쓸 수 있고,
+// 필요한 자리에서만 ImageBuffer<"RGBA8", 100, 60>처럼 정확한 크기를 표현할 수 있다.
+interface ImageBuffer<
+  Format extends PixelFormat,
+  W extends number = number,
+  H extends number = number,
+> {
   readonly data: Uint8ClampedArray;
-  readonly width: number;
-  readonly height: number;
+  readonly width: W;
+  readonly height: H;
   /** 타입에만 존재하는 표시. 실제 객체엔 절대 채우지 않는다 — 그래서 팬텀(phantom)이다. */
   readonly __format?: Format;
 }
 
-function makeImageBuffer<Format extends PixelFormat>(
+function makeImageBuffer<
+  Format extends PixelFormat,
+  W extends number = number,
+  H extends number = number,
+>(
   data: Uint8ClampedArray,
-  width: number,
-  height: number,
-): ImageBuffer<Format> {
+  width: W,
+  height: H,
+): ImageBuffer<Format, W, H> {
   // __format이 옵셔널이라 값을 넣지 않아도 구조적으로 ImageBuffer를 만족한다.
   // 포맷 정보는 런타임 객체를 더럽히지 않고 타입 검사에만 남는다.
+  // 숫자 리터럴을 넘기면 W와 H도 그 리터럴로 추론된다. 이렇게 얻은 ImageBuffer<F, 3, 2>는
+  // 너비·높이를 number로 받는 기존 ImageBuffer<F>에도 그대로 대입되므로 이전 호출부는 깨지지 않는다.
   return { data, width, height };
 }
 
@@ -383,7 +396,7 @@ function flipStage(direction: Direction): FlipStage {
             source.height,
             direction,
           );
-          copyPixel(source, sourceX, sourceY, out, x, y);
+          copyPixel(source, sourceX, sourceY, out, source.width, x, y);
         }
       }
 
@@ -665,6 +678,11 @@ type EdgePolicy = "clamp" | "wrap" | "mirror";
 // codeStep 444 — 플립 방향을 유니온으로 닫아 좌표 재배치가 모든 방향을 처리하게 한다.
 type Direction = "horizontal" | "vertical";
 
+// codeStep 448 — 회전은 90·180·270도라는 닫힌 각도 집합에서 하나를 고른다.
+// 90도와 270도는 너비와 높이까지 맞바꾸므로, 크기를 보존하는 플립의 Direction에 섞지 않는다.
+// 별도 유니온으로 두어 remapCoord의 "같은 크기 안에서 재배치한다"는 계약을 그대로 지킨다.
+type Rotation = "90" | "180" | "270";
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -723,6 +741,30 @@ function remapCoord(
   }
 }
 
+// 결과의 (ox, oy)가 값을 가져올 원본 좌표를 반환한다. 정방향으로 픽셀을 밀지 않고
+// 역좌표를 구하면 결과 배열을 빈틈이나 중복 없이 행 우선 순서로 한 번만 채울 수 있다.
+function rotateCoord(
+  ox: number,
+  oy: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  rotation: Rotation,
+): readonly [number, number] {
+  switch (rotation) {
+    case "90":
+      return [oy, sourceHeight - 1 - ox];
+    case "180":
+      return [sourceWidth - 1 - ox, sourceHeight - 1 - oy];
+    case "270":
+      return [sourceWidth - 1 - oy, ox];
+    default: {
+      // 각도를 추가하고 역좌표 계산을 빠뜨리면 이 소진 검사에서 컴파일이 먼저 깨진다.
+      const exhaustive: never = rotation;
+      throw new Error(`처리하지 않은 회전 각도: ${String(exhaustive)}`);
+    }
+  }
+}
+
 // codeStep 444 — 2차원 좌표를 평탄한 배열의 바이트 오프셋으로 바꾸는 유일한 자리다.
 // 지금까지 이 식은 readPixel과 두 컨볼루션 순회에 따로따로 적혀 있었다. 픽셀을 옮기는 일이
 // 곧 이 오프셋을 다시 계산하는 일이므로, 자리를 옮기기 전에 계산식부터 한곳으로 모은다.
@@ -745,14 +787,71 @@ function copyPixel(
   sourceX: number,
   sourceY: number,
   target: Uint8ClampedArray,
+  targetWidth: number,
   targetX: number,
   targetY: number,
 ): void {
   const pixel = readPixel(source, sourceX, sourceY);
   // 읽을 때와 쓸 때 모두 같은 pixelIndex를 지난다. 두 자리에서 오프셋 계산이 어긋날 수 없다.
-  // 플립은 너비와 높이를 바꾸지 않아 원본과 대상의 격자 모양이 같으므로 source.width를 쓴다.
-  // 다음 화의 회전처럼 크기가 뒤바뀌면 이 자리에 대상 너비를 따로 받아야 한다.
-  target.set(pixel, pixelIndex(source.width, targetX, targetY));
+  // 회전은 원본의 높이가 대상의 너비가 되므로, 쓰기 오프셋은 원본 너비에 기대지 않고
+  // 호출자가 넘긴 대상 너비로 계산한다. 플립은 두 너비가 같아 기존 동작을 그대로 유지한다.
+  target.set(pixel, pixelIndex(targetWidth, targetX, targetY));
+}
+
+// codeStep 448 — 세 각도의 실제 픽셀 순회는 이 코어 하나만 맡는다. 180도만 크기를 유지하고
+// 90·270도는 너비와 높이를 맞바꾸지만, 어느 경우든 결과 좌표에서 원본 좌표를 찾는 흐름은 같다.
+// pixelIndex가 픽셀당 4바이트를 전제로 하므로 포맷은 제네릭으로 열지 않고 RGBA8로 고정한다.
+// Gray8 같은 포맷까지 허용하면 타입은 통과해도 좌표별 바이트 오프셋이 조용히 틀어질 수 있다.
+function rotatePixels(
+  buf: ImageBuffer<"RGBA8">,
+  rotation: Rotation,
+): Uint8ClampedArray {
+  const swapsDimensions = rotation !== "180";
+  const outWidth = swapsDimensions ? buf.height : buf.width;
+  const outHeight = swapsDimensions ? buf.width : buf.height;
+  const out = new Uint8ClampedArray(buf.data.length);
+
+  // 결과 좌표를 차례로 돌며 그 자리에 들어올 원본 좌표를 역으로 찾는다. 각도별 공식은
+  // rotateCoord 한곳에만 있어, 세 공개 함수가 같은 이중 루프를 복사하지 않는다.
+  for (let oy = 0; oy < outHeight; oy += 1) {
+    for (let ox = 0; ox < outWidth; ox += 1) {
+      const [sourceX, sourceY] = rotateCoord(
+        ox,
+        oy,
+        buf.width,
+        buf.height,
+        rotation,
+      );
+      copyPixel(buf, sourceX, sourceY, out, outWidth, ox, oy);
+    }
+  }
+
+  return out;
+}
+
+// codeStep 446 — 90도 회전은 픽셀 포맷과 바이트 수를 보존하지만 너비와 높이를 맞바꾼다.
+// 스테이지 유니온에는 넣지 않고 평범한 함수로 두어, 크기를 보존하는 플립과 역할을 구분한다.
+// codeStep 447 — 입력의 W·H를 결과의 H·W로 놓아 런타임의 크기 교환을 타입에도 그대로 기록한다.
+function rotate90<W extends number, H extends number>(
+  buf: ImageBuffer<"RGBA8", W, H>,
+): ImageBuffer<"RGBA8", H, W> {
+  // buf.height는 H, buf.width는 W이므로 이 순서로 makeImageBuffer에 넘기면 반환 타입도
+  // ImageBuffer<"RGBA8", H, W>로 추론된다.
+  return makeImageBuffer(rotatePixels(buf, "90"), buf.height, buf.width);
+}
+
+// codeStep 448 — 270도도 직사각형의 두 축을 맞바꾸므로 90도와 같은 H·W 반환 타입을 가진다.
+function rotate270<W extends number, H extends number>(
+  buf: ImageBuffer<"RGBA8", W, H>,
+): ImageBuffer<"RGBA8", H, W> {
+  return makeImageBuffer(rotatePixels(buf, "270"), buf.height, buf.width);
+}
+
+// 180도는 두 축을 뒤집어도 각 축의 길이는 그대로다. 반환 타입에서도 W·H의 자리를 보존한다.
+function rotate180<W extends number, H extends number>(
+  buf: ImageBuffer<"RGBA8", W, H>,
+): ImageBuffer<"RGBA8", W, H> {
+  return makeImageBuffer(rotatePixels(buf, "180"), buf.width, buf.height);
 }
 
 function sampleEdge(
@@ -1159,6 +1258,69 @@ function main(): void {
     `플립 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
       `${horizontalFlipped.width}x${horizontalFlipped.height} ` +
       `bytes=${decodedImage.data.length} -> ${horizontalFlipped.data.length}`,
+  );
+
+  // codeStep 446 — 3×2 비대칭 버퍼를 시계 방향으로 돌리면 왼쪽 아래의 40부터 새 첫 행이 된다.
+  // 빨강 채널 여섯 개를 한 줄에 놓아 좌표 공식과 2×3 결과를 손으로 바로 대조할 수 있게 한다.
+  const rotatedAsymmetric = rotate90(asymmetricImage);
+  console.log(
+    `회전 3x2 빨강 원본 ${redChannels(asymmetricImage)} / ` +
+      `90도 ${redChannels(rotatedAsymmetric)}`,
+  );
+
+  // 실제 PNG도 같은 함수를 지나면 너비와 높이만 맞바뀌고 전체 픽셀 바이트 수는 그대로다.
+  const rotatedDecoded = rotate90(decodedImage);
+  console.log(
+    `회전 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${rotatedDecoded.width}x${rotatedDecoded.height} ` +
+      `bytes=${decodedImage.data.length} -> ${rotatedDecoded.data.length}`,
+  );
+
+  // codeStep 447 — 100×60 버퍼는 값뿐 아니라 타입에서도 두 리터럴을 정확히 들고 있다.
+  const wide = makeImageBuffer<"RGBA8", 100, 60>(
+    new Uint8ClampedArray(100 * 60 * 4),
+    100,
+    60,
+  );
+
+  // 회전 결과를 60×100 타입에 그대로 받을 수 있다 — 타입 인자가 자리를 바꿨다는 증거다.
+  const tall: ImageBuffer<"RGBA8", 60, 100> = rotate90(wide);
+
+  // @ts-expect-error — 회전 결과는 100×60이 아니라 60×100이라 대입이 막힌다
+  const wrongSize: ImageBuffer<"RGBA8", 100, 60> = rotate90(wide);
+
+  // codeStep 448 — 270도는 90도처럼 두 타입 인자의 자리를 바꾸고, 180도만 그대로 둔다.
+  // 세 대입을 한자리에 놓으면 같은 100×60 입력에서 각도에 따른 타입 차이가 바로 드러난다.
+  const rotated270Wide: ImageBuffer<"RGBA8", 60, 100> = rotate270(wide);
+  const rotated180Wide: ImageBuffer<"RGBA8", 100, 60> = rotate180(wide);
+
+  // @ts-expect-error — 180도 결과는 60×100이 아니라 원본과 같은 100×60이다
+  const wrong180Size: ImageBuffer<"RGBA8", 60, 100> = rotate180(wide);
+
+  // 타입에서 자리를 바꾼 두 숫자가 실행 중의 width·height와도 정확히 같은지 마지막 줄에서 확인한다.
+  console.log(`회전 타입 크기 ${wide.width}x${wide.height} -> ${tall.width}x${tall.height}`);
+
+  // 세 각도를 같은 비대칭 버퍼에 적용한다. 배열을 JSON으로 적어 행 경계와 각 결과 크기를
+  // 한 줄에서 함께 읽으면 90·180·270도의 좌표 공식이 서로 어떻게 다른지 손으로 검산할 수 있다.
+  const rotatedAsymmetric180 = rotate180(asymmetricImage);
+  const rotatedAsymmetric270 = rotate270(asymmetricImage);
+  console.log(
+    `회전 대조 90 ${rotatedAsymmetric.width}x${rotatedAsymmetric.height} ` +
+      `${JSON.stringify(redChannels(rotatedAsymmetric))} / ` +
+      `180 ${rotatedAsymmetric180.width}x${rotatedAsymmetric180.height} ` +
+      `${JSON.stringify(redChannels(rotatedAsymmetric180))} / ` +
+      `270 ${rotatedAsymmetric270.width}x${rotatedAsymmetric270.height} ` +
+      `${JSON.stringify(redChannels(rotatedAsymmetric270))}`,
+  );
+
+  // 실제 PNG를 한 바퀴가 되는 네 번의 90도와 제자리가 되는 두 번의 180도로 돌린다.
+  // 두 비교는 모두 너비와 높이가 원본으로 돌아온 뒤라 maxChannelDifference의 크기 가정도 지킨다.
+  const rotated90FourTimes = rotate90(rotate90(rotate90(rotate90(decodedImage))));
+  const rotated180Twice = rotate180(rotate180(decodedImage));
+  console.log(
+    `회전 회귀 원본과의 최대 채널 차이 ` +
+      `90도 네 번 ${maxChannelDifference(decodedImage, rotated90FourTimes)} / ` +
+      `180도 두 번 ${maxChannelDifference(decodedImage, rotated180Twice)}`,
   );
 }
 
