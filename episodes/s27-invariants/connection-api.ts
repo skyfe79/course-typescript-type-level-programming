@@ -24,7 +24,11 @@ interface ConnectionBase<State> {
 }
 
 // 연결 전 타입에는 send가 아예 없다. 이 비어 있음 자체가 "아직 보낼 수 없다"는 불변식이다.
-interface DisconnectedConnection extends ConnectionBase<Disconnected> {}
+interface DisconnectedConnection extends ConnectionBase<Disconnected> {
+  // connect는 연결 전 상태에서만 꺼내 쓸 수 있는 전이 메서드다.
+  // 현재 객체를 바꾸는 대신 다음 상태인 ConnectedConnection을 반환 타입으로 약속한다.
+  connect(): ConnectedConnection;
+}
 
 // send는 연결이 끝난 상태에만 공개한다. 선택적 메서드가 아니므로 존재 여부가 상태를 그대로 표현한다.
 interface ConnectedConnection extends ConnectionBase<Connected> {
@@ -42,14 +46,38 @@ const connectedHasSend: Eq<ConnectedHasSend, true> = true;
 const disconnectedKeepsHost: Eq<DisconnectedConnection["host"], string> = true;
 const connectedKeepsHost: Eq<ConnectedConnection["host"], string> = true;
 
+// codeStep 393 — connect()로 상태 전이시키기
+
 // 팩터리는 항상 연결 전 상태를 돌려준다. 이 반환 타입 때문에 호출자는 처음부터 send를 볼 수 없다.
 function createConnection(host: string): DisconnectedConnection {
-  return { host };
+  return {
+    host,
+    connect() {
+      // 현재 객체를 변이해 같은 타입으로 남겨 두지 않고, 다음 상태를 나타내는 새 객체를 반환한다.
+      return {
+        // 실제 데이터도 새 상태 객체에 함께 옮겨지므로 상태 전이가 host를 잃지 않는다.
+        host,
+        send(data: string) {
+          console.log(`[${host}] send: ${data}`);
+        },
+      };
+    },
+  };
 }
 
 const connection = createConnection("localhost");
 
 // 팩터리가 돌려준 값의 타입은 정확히 DisconnectedConnection이다.
 const createReturnsDisconnected: Eq<typeof connection, DisconnectedConnection> = true;
+
+// 반환값을 이어 받으면 호출 순서가 값의 흐름과 타입의 흐름에 함께 나타난다.
+const connected = connection.connect();
+
+// connect()가 돌려준 값의 타입은 다음 상태인 ConnectedConnection으로 정확히 고정된다.
+// 반환 타입이 달라지는 것 자체가 타입 수준의 상태 전이다.
+const connectReturnsConnected: Eq<typeof connected, ConnectedConnection> = true;
+
+// 타입에서 확인한 전이는 실행 결과로도 그대로 이어진다.
+connected.send("hi");
 
 export {};
