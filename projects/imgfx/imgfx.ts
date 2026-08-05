@@ -96,8 +96,19 @@ interface ContrastStage extends PixelStage<"contrast", "RGBA8", "RGBA8"> {
   readonly amount: number;
 }
 
+// codeStep 437 — 임계값 효과도 RGBA8 한 픽셀을 RGBA8 한 픽셀로 바꾸지만,
+// 어느 쪽으로 가를지는 스테이지 데이터에 보관한 level이 결정한다.
+interface ThresholdStage extends PixelStage<"threshold", "RGBA8", "RGBA8"> {
+  readonly level: number;
+}
+
 // 모든 스테이지를 하나의 판별 유니온으로 모으면 kind를 확인할 때 나머지 필드도 함께 좁혀진다.
-type AnyStage = InvertStage | GrayscaleStage | BrightnessStage | ContrastStage;
+type AnyStage =
+  | InvertStage
+  | GrayscaleStage
+  | BrightnessStage
+  | ContrastStage
+  | ThresholdStage;
 
 // 생성자 함수는 실행 로직이 아니라, 오타 없이 스테이지 데이터 한 건을 만드는 작은 도우미다.
 function invertStage(): InvertStage {
@@ -140,6 +151,17 @@ function contrastStage(amount: number): ContrastStage {
   };
 }
 
+// codeStep 437 — 임계값 스테이지도 커널을 공유 순회에 건네기만 한다.
+function thresholdStage(level: number): ThresholdStage {
+  return {
+    kind: "threshold",
+    level,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (buf) => mapPixels(buf, "RGBA8", thresholdKernel(level)),
+  };
+}
+
 // 아직 실행기가 읽기 전인데도 계획 전체를 직렬화하거나 순서를 바꿀 수 있다.
 const plan: readonly AnyStage[] = [invertStage(), brightnessStage(20), grayscaleStage()];
 
@@ -154,6 +176,9 @@ function describeStage(stage: AnyStage): string {
       return `밝기 ${stage.amount}`;
     case "contrast":
       return `대비 ${stage.amount}`;
+    // codeStep 437 — AnyStage에 넣은 새 종류도 처리해 소진 검사를 다시 만족시킨다.
+    case "threshold":
+      return `임계값 ${stage.level}`;
     default: {
       // 모든 case를 처리했다면 이 지점의 stage에는 가능한 값이 없어 never로 좁혀진다.
       const exhaustive: never = stage;
@@ -183,6 +208,9 @@ function describeStageMissingFlip(stage: AnyStageWithFlip): string {
       return `밝기 ${stage.amount}`;
     case "contrast":
       return `대비 ${stage.amount}`;
+    // codeStep 437 — 여기서 빠뜨리는 종류는 계속 flip 하나뿐이어야 한다.
+    case "threshold":
+      return `임계값 ${stage.level}`;
     default: {
       // flip을 처리하지 않았으므로 여기의 stage는 FlipStage로 남아 never에 대입할 수 없다.
       // @ts-expect-error — flip을 처리하지 않아 stage가 FlipStage로 남는다
@@ -203,6 +231,9 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
       return `밝기 ${stage.amount}`;
     case "contrast":
       return `대비 ${stage.amount}`;
+    // codeStep 437 — flip을 포함한 실행기도 임계값 스테이지를 빠짐없이 설명한다.
+    case "threshold":
+      return `임계값 ${stage.level}`;
     case "flip":
       return "뒤집기";
     default: {
@@ -335,8 +366,14 @@ function mapPixels<In extends PixelFormat, Out extends PixelFormat>(
   return makeImageBuffer<Out>(out, source.width, source.height);
 }
 
+// codeStep 437 — 그레이스케일과 임계값이 같은 밝기 정의를 공유하도록 계산을 한곳에 모은다.
+function luma(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
 const toGrayscale: PixelKernel<"RGBA8", "Gray8"> = ([r, g, b]) => [
-  Math.round(0.299 * r + 0.587 * g + 0.114 * b),
+  // Gray8 채널 하나로 저장하는 그레이스케일만 여기서 밝기를 정수로 반올림한다.
+  Math.round(luma(r, g, b)),
 ];
 
 // Stage는 여전히 "무엇을 할지"만 말하는 데이터이고, PixelStage는 거기에 "어떻게 할지"를 더한다.
@@ -370,6 +407,13 @@ const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
     (b - 128) * factor + 128,
     a,
   ];
+
+// codeStep 437 — 밝기가 level 이상이면 흰색, 미만이면 검은색으로 가르되 알파는 보존한다.
+const thresholdKernel = (level: number): PixelKernel<"RGBA8", "RGBA8"> =>
+  ([r, g, b, a]) => {
+    const channel = luma(r, g, b) >= level ? 255 : 0;
+    return [channel, channel, channel, a];
+  };
 
 // codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
 function clampingContrast(): string {
@@ -458,6 +502,10 @@ function main(): void {
   console.log(`반전 픽셀 ${Array.from(invertStage().run(samplePixel).data)}`);
   console.log(`밝기 50 픽셀 ${Array.from(brightnessStage(50).run(samplePixel).data)}`);
   console.log(`대비 1.5 픽셀 ${Array.from(contrastStage(1.5).run(samplePixel).data)}`);
+
+  // codeStep 437 — 밝기가 약 152인 같은 픽셀이 기준 128에서는 흰색, 200에서는 검은색이 된다.
+  console.log(`임계값 128 픽셀 ${Array.from(thresholdStage(128).run(samplePixel).data)}`);
+  console.log(`임계값 200 픽셀 ${Array.from(thresholdStage(200).run(samplePixel).data)}`);
 
   // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
   // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
