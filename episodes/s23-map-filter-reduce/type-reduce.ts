@@ -179,4 +179,26 @@ const totalIsTen: Eq<Total, 10> = true;
 // @ts-expect-error - Total은 10이므로 11과 정확히 같은 타입일 수 없다
 const totalIsNotEleven: Eq<Total, 11> = true;
 
+// codeStep 336 — ReduceT로 문자열을 이어 붙인다.
+
+// Join도 같은 TypeFn2 인코딩을 쓴다. acc를 string으로, item을 string | number로 차례로 좁혀야
+// unknown인 두 슬롯을 템플릿 리터럴 타입 안에서 안전하게 사용할 수 있다.
+// 빈 문자열은 첫 원소 앞에 쉼표가 붙지 않게 하는 시작값이고, 그 뒤부터는 쉼표와 원소를 함께 붙인다.
+interface JoinF extends TypeFn2 {
+  readonly out: this["acc"] extends string
+    ? this["item"] extends string | number
+      ? this["acc"] extends ""
+        ? `${this["item"]}`
+        : `${this["acc"]},${this["item"]}`
+      : never
+    : never;
+}
+
+type Csv = ReduceT<["red", "green", "blue"], JoinF, "">;
+
+// 각 문자열 리터럴이 보존되어 최종 결과가 정확히 하나의 CSV 문자열 리터럴이 된다.
+const csvIsExact: Eq<Csv, "red,green,blue"> = true;
+// @ts-expect-error - JoinF는 원소 사이를 쉼표로 연결하므로 공백으로 연결한 문자열은 결과가 아니다
+const csvIsNotSpaced: Eq<Csv, "red green blue"> = true;
+
 export {};
