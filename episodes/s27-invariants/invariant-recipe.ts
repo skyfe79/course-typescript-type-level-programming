@@ -47,4 +47,31 @@ function createConnection(host: string): ClosedConnection {
   };
 }
 
+// codeStep 384 — 컴파일 에러로 확인하기
+
+// Eq는 두 타입이 정확히 같은지 판별해, 편집기 호버 대신 기대한 상태 타입을 컴파일러에 고정한다.
+type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
+
+const conn = createConnection("localhost");
+
+// 팩터리의 결과는 연결 전 상태이고, connect를 거친 결과는 연결 후 상태다.
+const createdAsClosed: Eq<typeof conn, ClosedConnection> = true;
+const connectedAsOpen: Eq<ReturnType<typeof conn.connect>, OpenConnection> = true;
+
+// keyof 검사로도 ClosedConnection에 send라는 키 자체가 없다는 사실을 고정한다.
+type ClosedHasSend = "send" extends keyof ClosedConnection ? true : false;
+const closedHasNoSend: Eq<ClosedHasSend, false> = true;
+
+function tryToSendBeforeConnect(): void {
+  // 타입 오류가 있어도 Node의 타입 스트리핑은 이 호출을 런타임에서 막아 주지 않는다.
+  // 실행하면 TypeError로 파일이 중단되므로, 컴파일 에러만 확인하고 이 함수는 호출하지 않는다.
+  // @ts-expect-error - 연결 전 상태인 ClosedConnection에는 send가 없다
+  conn.send("hello");
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/invariant-recipe.ts(68,8): error TS2339: Property 'send' does not exist on type 'ClosedConnection'.
+}
+
+// connect 뒤에는 OpenConnection을 받으므로 send가 허용되며, 이 경로는 실제로 실행해 로그를 확인한다.
+conn.connect().send("hello");
+
 export {};
