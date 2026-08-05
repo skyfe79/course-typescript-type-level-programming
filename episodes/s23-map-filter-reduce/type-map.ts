@@ -86,4 +86,60 @@ const nullableExact: [1 | null, "two" | null, true | null] = nullableProof;
 // BoxedRow는 위에서 그대로 유효하게 남아 있다. 하나의 재귀가 두 F를 모두 받아 냈다.
 console.log("NullableRow:", nullableExact);
 
+// 이번 화의 첫 번째 변환은 리터럴 타입을 각각 대응하는 넓은 원시 타입으로 바꾼다.
+// 조건부 타입은 string, number, boolean 리터럴만 넓히고 나머지 타입은 그대로 둔다.
+type Widen<T> = T extends string ? string
+  : T extends number ? number
+  : T extends boolean ? boolean
+  : T;
+
+interface WidenF extends TypeFn {
+  readonly out: Widen<this["arg"]>;
+}
+
+type WidenedRow = MapT<typeof row, WidenF>;
+
+// 원래 리터럴과 다른 값도 대입할 수 있으므로 1, "two", true가 넓어졌음을 알 수 있다.
+const widenedProof: WidenedRow = [42, "another string", false];
+const widenedExact: [number, string, boolean] = widenedProof;
+
+// 이번 화의 두 번째 변환은 각 원소를 자기 타입의 배열로 감싼다.
+// MapT의 재귀 정의를 이번에도 손대지 않았다. 바뀌는 것은 F 자리에 들어가는 규칙뿐이다.
+interface ArrayWrapF extends TypeFn {
+  readonly out: (this["arg"])[];
+}
+
+type ArrayRow = MapT<typeof row, ArrayWrapF>;
+
+// 배열 안에서는 각 원소의 리터럴 타입이 그대로 유지된다.
+// 바깥 튜플은 MapT의 누산기가 [...Acc, ...]로 새로 만들어지므로 readonly가 아니다.
+const arrayProof: ArrayRow = [[1, 1], ["two"], [true, true]];
+const arrayExact: [1[], "two"[], true[]] = arrayProof;
+
+// 이번 화의 세 번째 변환은 원소 타입의 종류를 문자열 리터럴 타입으로 설명한다.
+type Describe<T> = T extends number ? "number"
+  : T extends string ? "string"
+  : T extends boolean ? "boolean"
+  : "other";
+
+interface DescribeF extends TypeFn {
+  readonly out: Describe<this["arg"]>;
+}
+
+type KindRow = MapT<typeof row, DescribeF>;
+
+// 세 자리가 서로 다른 문자열 리터럴로 정확히 계산되었음을 값 대입으로 고정한다.
+const kindProof: KindRow = ["number", "string", "boolean"];
+const kindExact: ["number", "string", "boolean"] = kindProof;
+
+function describeAll<T extends readonly unknown[]>(list: T): MapT<T, DescribeF> {
+  // map은 평범한 문자열 배열을 만들지만 제네릭 T에 대한 MapT는 함수 본문에서 아직 계산되지 않는다.
+  // 그래서 컴파일러가 두 결과를 자동으로 이어 주지 못하는 경계에서 반환 타입을 명시한다.
+  return list.map((v) =>
+    typeof v === "number" ? "number" : typeof v === "string" ? "string" : "boolean"
+  ) as MapT<T, DescribeF>;
+}
+
+console.log("Kinds:", describeAll(row));
+
 export {};
