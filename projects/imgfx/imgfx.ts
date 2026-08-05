@@ -357,14 +357,48 @@ function describeStage(stage: AnyStage): string {
   }
 }
 
-interface FlipStage extends Stage<"flip", "RGBA8", "RGBA8"> {}
+// codeStep 445 — 플립은 포맷과 크기를 보존하지만, 이제 버퍼 전체를 실행하는 run을 가진다.
+interface FlipStage extends PixelStage<"flip", "RGBA8", "RGBA8"> {
+  readonly direction: Direction;
+}
 type AnyStageWithFlip = AnyStage | FlipStage;
 
-function flipStage(): FlipStage {
-  // codeStep 435 — FlipStage는 이번 화의 픽셀 커널 대상에서 의도적으로 제외한다.
-  // 뒤집기는 주변 픽셀의 위치까지 알아야 하는 기하 변환이라 픽셀 하나만 받는 커널로 표현하지 않는다.
-  // 따라서 FlipStage는 이번 화에도 실행 함수가 없는 순수 Stage로 남는다.
-  return { kind: "flip", in: "RGBA8", out: "RGBA8" };
+function flipStage(direction: Direction): FlipStage {
+  return {
+    kind: "flip",
+    direction,
+    in: "RGBA8",
+    out: "RGBA8",
+    run: (source) => {
+      // 입력을 제자리에서 바꾸지 않는 저장소의 보장을 지키려고 결과 버퍼를 새로 만든다.
+      const out = new Uint8ClampedArray(source.data.length);
+
+      // 대상 좌표를 차례로 돌며, 그 자리에 들어올 원본 좌표만 방향에 따라 재배치한다.
+      for (let y = 0; y < source.height; y += 1) {
+        for (let x = 0; x < source.width; x += 1) {
+          const [sourceX, sourceY] = remapCoord(
+            x,
+            y,
+            source.width,
+            source.height,
+            direction,
+          );
+          copyPixel(source, sourceX, sourceY, out, x, y);
+        }
+      }
+
+      return makeImageBuffer(out, source.width, source.height);
+    },
+  };
+}
+
+// 두 방향 생성자는 같은 flipStage 하나에 direction만 다르게 넘긴 결과다.
+function flipHorizontalStage(): FlipStage {
+  return flipStage("horizontal");
+}
+
+function flipVerticalStage(): FlipStage {
+  return flipStage("vertical");
 }
 
 // 새 스테이지를 유니온에 넣고도 실행기의 case를 추가하지 않은 순간을 컴파일되는 예제로 남긴다.
@@ -417,7 +451,7 @@ function describeStageWithFlip(stage: AnyStageWithFlip): string {
     case "convolve":
       return `컨볼루션 ${stage.effect} ${stage.side}x${stage.side}`;
     case "flip":
-      return "뒤집기";
+      return `뒤집기 ${stage.direction}`;
     default: {
       // 스테이지 종류를 늘리면 실행기가 컴파일 단계에서 먼저 깨진다.
       // 이것이 닫힌 판별 유니온 하나로 스테이지 목록을 모아 둔 핵심 이유다.
@@ -628,6 +662,9 @@ type ConvolveAxis = "row" | "column";
 // codeStep 442 — 이미지 밖 이웃을 안으로 되돌리는 방법은 참·거짓이 아니라 세 정책 중 하나다.
 type EdgePolicy = "clamp" | "wrap" | "mirror";
 
+// codeStep 444 — 플립 방향을 유니온으로 닫아 좌표 재배치가 모든 방향을 처리하게 한다.
+type Direction = "horizontal" | "vertical";
+
 function resolveAxisCoord(v: number, limit: number, policy: EdgePolicy): number {
   switch (policy) {
     case "clamp":
@@ -666,13 +703,56 @@ function clampCoord(
   return [resolveAxisCoord(x, width, policy), resolveAxisCoord(y, height, policy)];
 }
 
+function remapCoord(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  direction: Direction,
+): readonly [number, number] {
+  switch (direction) {
+    case "horizontal":
+      return [width - 1 - x, y];
+    case "vertical":
+      return [x, height - 1 - y];
+    default: {
+      // 방향을 추가하고 좌표 계산을 빠뜨리면 이 소진 검사에서 컴파일이 먼저 깨진다.
+      const exhaustive: never = direction;
+      throw new Error(`처리하지 않은 플립 방향: ${String(exhaustive)}`);
+    }
+  }
+}
+
+// codeStep 444 — 2차원 좌표를 평탄한 배열의 바이트 오프셋으로 바꾸는 유일한 자리다.
+// 지금까지 이 식은 readPixel과 두 컨볼루션 순회에 따로따로 적혀 있었다. 픽셀을 옮기는 일이
+// 곧 이 오프셋을 다시 계산하는 일이므로, 자리를 옮기기 전에 계산식부터 한곳으로 모은다.
+// RGBA8 경로에서만 쓰이므로 픽셀당 바이트 수는 4로 고정이다.
+function pixelIndex(width: number, x: number, y: number): number {
+  return (y * width + x) * 4;
+}
+
 function readPixel(
   buf: ImageBuffer<"RGBA8">,
   x: number,
   y: number,
 ): Pixel<"RGBA8"> {
-  const index = (y * buf.width + x) * 4;
+  const index = pixelIndex(buf.width, x, y);
   return [buf.data[index], buf.data[index + 1], buf.data[index + 2], buf.data[index + 3]];
+}
+
+function copyPixel(
+  source: ImageBuffer<"RGBA8">,
+  sourceX: number,
+  sourceY: number,
+  target: Uint8ClampedArray,
+  targetX: number,
+  targetY: number,
+): void {
+  const pixel = readPixel(source, sourceX, sourceY);
+  // 읽을 때와 쓸 때 모두 같은 pixelIndex를 지난다. 두 자리에서 오프셋 계산이 어긋날 수 없다.
+  // 플립은 너비와 높이를 바꾸지 않아 원본과 대상의 격자 모양이 같으므로 source.width를 쓴다.
+  // 다음 화의 회전처럼 크기가 뒤바뀌면 이 자리에 대상 너비를 따로 받아야 한다.
+  target.set(pixel, pixelIndex(source.width, targetX, targetY));
 }
 
 function sampleEdge(
@@ -716,13 +796,13 @@ function convolve1D(
           // 정책 유니온이 한 축의 좌표를 결정하므로 같은 순회가 clamp·wrap·mirror를 모두 쓴다.
           const sampleX = resolveAxisCoord(rawX, source.width, edge);
           const sampleY = resolveAxisCoord(rawY, source.height, edge);
-          const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+          const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
 
           sum += source.data[sampleIndex] * weights[tap];
           multiplyCount += 1;
         }
 
-        out[(y * source.width + x) * 4 + channel] = sum;
+        out[pixelIndex(source.width, x, y) + channel] = sum;
       }
     }
   }
@@ -780,7 +860,7 @@ function convolve(
           for (let kernelX = 0; kernelX < kernel.side; kernelX += 1) {
             const sampleX = resolveAxisCoord(x + kernelX - radius, source.width, edge);
             const sampleY = resolveAxisCoord(y + kernelY - radius, source.height, edge);
-            const sampleIndex = (sampleY * source.width + sampleX) * 4 + channel;
+            const sampleIndex = pixelIndex(source.width, sampleX, sampleY) + channel;
             const weightIndex = kernelY * kernel.side + kernelX;
 
             sum += source.data[sampleIndex] * kernel.weights[weightIndex];
@@ -789,7 +869,7 @@ function convolve(
         }
 
         // 실수 누적값을 모두 구한 뒤 Uint8ClampedArray에 쓰는 이 순간 한 번만 반올림·클램핑한다.
-        out[(y * source.width + x) * 4 + channel] = sum / kernel.divisor;
+        out[pixelIndex(source.width, x, y) + channel] = sum / kernel.divisor;
       }
     }
   }
@@ -909,7 +989,9 @@ function main(): void {
   console.log(`plan ${JSON.stringify(plan)}`);
   console.log(`describe ${plan.map(describeStage).join(" · ")}`);
   console.log(
-    `describe with flip ${[...plan, flipStage()].map(describeStageWithFlip).join(" · ")}`,
+    `describe with flip ${[...plan, flipStage("horizontal")]
+      .map(describeStageWithFlip)
+      .join(" · ")}`,
   );
   run(pipeline(invertStage(), grayscaleStage()));
 
@@ -1017,7 +1099,8 @@ function main(): void {
   for (let pixel = 0; pixel < 9; pixel += 1) {
     impulseData[pixel * 4 + 3] = 255;
   }
-  impulseData.set([200, 120, 40, 255], (1 * 3 + 1) * 4);
+  // codeStep 444 — 가운데 픽셀 (1, 1)의 자리도 손으로 적지 않고 pixelIndex로 구한다.
+  impulseData.set([200, 120, 40, 255], pixelIndex(3, 1, 1));
   const impulseImage: ImageBuffer<"RGBA8"> = makeImageBuffer(impulseData, 3, 3);
   const gaussianImage = gaussianBlurStage().run(impulseImage);
   const sharpenedImage = sharpenStage().run(impulseImage);
@@ -1034,6 +1117,49 @@ function main(): void {
 
   // 정상 경로와 제자리 덮어쓰기 경로의 두 줄을 한 데모 문자열로 받아 오염의 진행을 나란히 본다.
   console.log(`스크래치 버퍼 ${inPlaceCorruptionDemo()}`);
+
+  // codeStep 444 — 10×20 격자의 (0,5)는 수평이면 오른쪽 끝 열 9로, 수직이면 아래쪽 행 14로 간다.
+  // 두 결과 모두 같은 함수 하나가 direction만 보고 계산한 것이다.
+  console.log(
+    `좌표 재배치 10x20 (0,5) horizontal ` +
+      `${JSON.stringify(remapCoord(0, 5, 10, 20, "horizontal"))} / ` +
+      `vertical ${JSON.stringify(remapCoord(0, 5, 10, 20, "vertical"))}`,
+  );
+
+  // codeStep 445 — 빨강 채널만 뽑아 보면 픽셀이 어느 자리로 옮겨 갔는지가 숫자로 드러난다.
+  const redChannels = (image: ImageBuffer<"RGBA8">): number[] =>
+    Array.from({ length: image.width * image.height }, (_, pixel) => image.data[pixel * 4]);
+
+  // 앞서 쓴 3×3 임펄스 버퍼는 중앙 대칭이라 뒤집어도 그대로다. 서로 다른 빨강 값 여섯 개를 가진
+  // 3×2 비대칭 버퍼라야 두 방향이 실제로 무엇을 옮겼는지 눈에 보인다.
+  const asymmetricData = new Uint8ClampedArray([
+    10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255,
+    40, 0, 0, 255, 50, 0, 0, 255, 60, 0, 0, 255,
+  ]);
+  const asymmetricImage: ImageBuffer<"RGBA8"> = makeImageBuffer(asymmetricData, 3, 2);
+  console.log(
+    `플립 3x2 빨강 원본 ${redChannels(asymmetricImage)} / ` +
+      `수평 ${redChannels(flipHorizontalStage().run(asymmetricImage))} / ` +
+      `수직 ${redChannels(flipVerticalStage().run(asymmetricImage))}`,
+  );
+
+  // 같은 방향으로 두 번 뒤집으면 모든 픽셀이 제자리로 돌아온다. 실제 PNG에서 최대 채널 차이가
+  // 0으로 나오는 것이 remapCoord의 좌표 계산이 맞다는 실행 시점 증거다.
+  const horizontalFlipped = flipHorizontalStage().run(decodedImage);
+  const verticalFlipped = flipVerticalStage().run(decodedImage);
+  console.log(
+    `두 번 뒤집기 원본과의 최대 채널 차이 ` +
+      `수평 ${maxChannelDifference(decodedImage, flipHorizontalStage().run(horizontalFlipped))} / ` +
+      `수직 ${maxChannelDifference(decodedImage, flipVerticalStage().run(verticalFlipped))}`,
+  );
+
+  // 이 화의 payoff — 자리만 바뀌고 너비·높이·바이트 수는 그대로다. 그래서 Stage의 in과 out이
+  // 둘 다 "RGBA8"로 같고, 타입 안에서는 아무것도 달라지지 않는다.
+  console.log(
+    `플립 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${horizontalFlipped.width}x${horizontalFlipped.height} ` +
+      `bytes=${decodedImage.data.length} -> ${horizontalFlipped.data.length}`,
+  );
 }
 
 main();
