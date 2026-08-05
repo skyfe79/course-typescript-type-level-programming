@@ -9,6 +9,8 @@ interface InteractionState {
   click: boolean;
   hover: boolean;
   focus: boolean;
+  // 밑줄로 시작하는 _debug는 외부 핸들러로 공개하지 않을 내부 전용 상태다.
+  _debug: boolean;
 }
 
 // 기존의 { [K in keyof T]: T[K] } 형태는 원래 키 이름에 묶여 있어 click을 그대로 프로퍼티 이름으로 사용한다.
@@ -20,9 +22,24 @@ type Handlers = {
 // Eq는 두 타입이 정확히 같은지를 판별해 편집기의 호버 결과를 컴파일러 검사로도 고정한다.
 type Eq<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
 
-// 세 상태 키가 빠짐없이 on으로 시작하는 핸들러 프로퍼티 이름으로 바뀌었는지 확인한다.
+// Capitalize는 밑줄을 대문자로 바꾸지 못하므로 _debug도 on_debug라는 프로퍼티로 그대로 따라 들어온다.
+// 이름만 바꾸는 as절은 어떤 키를 만들지는 정해도 어떤 키를 빼놓을지는 정하지 못한다.
 const handlersMatchState: Eq<
   Handlers,
+  { onClick: () => void; onHover: () => void; onFocus: () => void; on_debug: () => void }
+> = true;
+
+// codeStep 358 — 특정 키를 걸러내는 매핑된 타입 만들기
+
+// 조건부 as절은 밑줄로 시작하는 키를 never로 바꾸고, 나머지 키만 핸들러 이름으로 리매핑한다.
+// 매핑된 타입의 새 키가 never가 되면 그 프로퍼티는 결과 타입에 아예 만들어지지 않는다.
+type PublicHandlers = {
+  [K in keyof InteractionState as K extends `_${string}` ? never : `on${Capitalize<K & string>}`]: () => void;
+};
+
+// 같은 InteractionState를 리매핑했는데도 on_debug가 빠져 공개 상태 세 개만 핸들러로 남는다.
+const publicHandlersMatchState: Eq<
+  PublicHandlers,
   { onClick: () => void; onHover: () => void; onFocus: () => void }
 > = true;
 
@@ -32,6 +49,9 @@ function toHandlers(state: InteractionState): Record<string, () => void> {
   const handlers: Record<string, () => void> = {};
 
   for (const key of Object.keys(state)) {
+    // 타입에서 걸러낸 내부 키가 값에서도 나타나지 않도록 같은 밑줄 규칙으로 건너뛴다.
+    if (key.startsWith("_")) continue;
+
     const name = `on${key[0].toUpperCase()}${key.slice(1)}`;
     handlers[name] = () => console.log(`${name} fired`);
   }
@@ -44,6 +64,7 @@ const state: InteractionState = {
   click: false,
   hover: false,
   focus: false,
+  _debug: false,
 };
 
 // 명령줄에서 받은 상태 키에도 같은 규칙을 적용하고, 인자가 없으면 hover 핸들러를 호출한다.
@@ -51,5 +72,8 @@ const handlers = toHandlers(state);
 const requested = process.argv[2] ?? "hover";
 const name = `on${requested[0].toUpperCase()}${requested.slice(1)}`;
 handlers[name]?.();
+
+// 런타임 객체에도 on_debug가 없고 공개 핸들러 세 개만 있는지 출력해 확인한다.
+console.log(Object.keys(handlers));
 
 export {};
