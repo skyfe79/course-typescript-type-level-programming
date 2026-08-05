@@ -1,6 +1,7 @@
 // 식 파서 위에 문 디스패치가 더해지면서 만드는 일곱 가지 Statement를 관찰한다.
 
 import type { Expr, Statement } from "./src/ast.ts";
+import type { Diagnostic } from "./src/diagnostics.ts";
 import { tokenize } from "./src/lexer.ts";
 import { createParser } from "./src/parser.ts";
 
@@ -60,46 +61,56 @@ function describeStatement(statement: Statement): string {
   }
 }
 
-function parse(source: string): Statement {
-  return createParser(tokenize(source).tokens).parseStatement();
+function describeDiagnostic(diagnostic: Diagnostic): string {
+  return `실패: ${diagnostic.severity} ${diagnostic.message} (줄 ${diagnostic.line}, 오프셋 ${diagnostic.offset})`;
+}
+
+function parse(source: string): Statement | undefined {
+  const result = createParser(tokenize(source).tokens).parseStatement();
+  if (!result.ok) {
+    console.log(describeDiagnostic(result.diagnostic));
+    return undefined;
+  }
+
+  return result.value;
 }
 
 const goalSource = "let x: number = 1 + 2;";
-const goalStatement = parse(goalSource);
 console.log(`=== 오늘의 목표 문: ${goalSource} ===`);
-console.log(describeStatement(goalStatement));
-console.log("\n전체 트리 JSON:");
-console.log(JSON.stringify(goalStatement, null, 2));
+const goalStatement = parse(goalSource);
+if (goalStatement !== undefined) {
+  console.log(describeStatement(goalStatement));
+  console.log("\n전체 트리 JSON:");
+  console.log(JSON.stringify(goalStatement, null, 2));
+}
 
 const ifElseSource = "if (x < 10) { x = x + 1; } else { x = 0; }";
-const ifElseStatement = parse(ifElseSource);
 console.log(`\n=== if의 thenBranch와 elseBranch: ${ifElseSource} ===`);
-console.log(describeStatement(ifElseStatement));
-console.log(JSON.stringify(ifElseStatement, null, 2));
+const ifElseStatement = parse(ifElseSource);
+if (ifElseStatement !== undefined) {
+  console.log(describeStatement(ifElseStatement));
+  console.log(JSON.stringify(ifElseStatement, null, 2));
+}
 
 const elseIfSource = "if (x < 0) { x = 0; } else if (x < 10) { x = x + 1; } else { x = 10; }";
-const elseIfStatement = parse(elseIfSource);
 console.log(`\n=== elseBranch에 담긴 또 다른 if: ${elseIfSource} ===`);
-console.log(describeStatement(elseIfStatement));
-console.log(JSON.stringify(elseIfStatement, null, 2));
+const elseIfStatement = parse(elseIfSource);
+if (elseIfStatement !== undefined) {
+  console.log(describeStatement(elseIfStatement));
+  console.log(JSON.stringify(elseIfStatement, null, 2));
+}
 
 const whileSource = "while (x < 10) { x = x + 1; }";
 console.log(`\n=== while의 condition과 body: ${whileSource} ===`);
-console.log(describeStatement(parse(whileSource)));
+const whileStatement = parse(whileSource);
+if (whileStatement !== undefined) console.log(describeStatement(whileStatement));
 
 const blockSource = "{ let total: number = 0; while (total < 3) { total = total + 1; } return total; }";
 console.log(`\n=== 블록에 쌓인 여러 문: ${blockSource} ===`);
-console.log(describeStatement(parse(blockSource)));
+const blockStatement = parse(blockSource);
+if (blockStatement !== undefined) console.log(describeStatement(blockStatement));
 
 const invalidSource = "if (x < 10) { x = x + 1;";
 console.log(`\n=== 닫는 중괄호가 없는 문: ${invalidSource} ===`);
-console.log("다음 스텝에서는 이 예외가 진단 값이 됩니다.");
-try {
-  parse(invalidSource);
-} catch (error) {
-  if (error instanceof Error) {
-    console.log(error.message);
-  } else {
-    throw error;
-  }
-}
+console.log("파서는 첫 실패를 위치가 분리된 진단 값으로 돌려줍니다.");
+parse(invalidSource);
