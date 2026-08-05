@@ -471,4 +471,39 @@ console.log(
     .rows(),
 );
 
+// codeStep 382 — 잘못된 컬럼 참조로 에러 확인하기
+
+const guardQuery = from("users");
+const postsRefQuery = from("posts");
+
+// 이 저장소는 태그 시점마다 npx tsc --noEmit이 0 오류여야 하므로 일부러 틀린 호출은
+// 타입 검사 지시어로 소비한다. 그러면 이 줄들이 지금 기대한 오류라는 사실을 코드 안에 남기면서도
+// 타입 게이트는 깨지지 않는다. 나중에 이 호출이 오류가 아니게 되면 지시어 자체가 쓰이지 않았다는
+// 오류가 나므로, ColumnRef 규칙이 달라졌다는 신호도 바로 얻을 수 있다.
+// "name"은 users 테이블에 실제로 있는 컬럼 이름인데도 막힌다. 구조적으로는 같은 문자열이지만
+// column을 거치지 않아 브랜드 표시가 없으므로 ColumnRef 자리에 들어가지 못한다.
+// 이 화 도입에서 orderBy("nmae") 같은 오타가 아무 제지 없이 통과하던 문제는 여기서 닫힌다.
+// 오타든 정타든 column을 거치지 않은 문자열은 전부 막히기 때문이다.
+// @ts-expect-error - error TS2345: Argument of type '"name"' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy("name");
+
+// posts의 title은 UsersSchema에 아예 없는 이름이다. 따라서 이 호출은 당연히 막히지만,
+// 이 줄만으로는 브랜드 때문에 막혔는지 컬럼 이름 자체가 users에 없어서 막혔는지 구분되지 않는다.
+// 그래서 바로 다음 id 예제가 따로 필요하다.
+// @ts-expect-error - error TS2345: Argument of type 'ColumnRef<PostsSchema, "title">' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy(postsRefQuery.column("title"));
+
+// id는 UsersSchema와 PostsSchema 양쪽에 모두 있고 둘 다 number다. 이름으로도 값 타입으로도
+// 구분할 근거가 없는데도 이 호출은 막힌다. 막는 것은 오직 ColumnRef 브랜드 안에 기록된 Row뿐이다.
+// 따라서 이 줄은 브랜드가 컬럼 이름뿐 아니라 테이블 자체를 구분한다는 사실을 홀로 증명한다.
+// 위의 title 예제는 이 사실을 보여 주기에 부족하고, 양쪽에 같은 이름과 같은 값 타입으로 존재하는
+// id 예제가 있어야 출처가 다른 참조라는 이유만 남는다.
+// @ts-expect-error - error TS2345: Argument of type 'ColumnRef<PostsSchema, "id">' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy(postsRefQuery.column("id"));
+
+// 같은 빌더에서 만든 참조는 그대로 받아들여진다. 따라서 위 호출들이 막힌 이유는 orderBy가
+// 까다로워서가 아니라, 넘긴 참조의 출처가 현재 빌더와 다르기 때문이라는 것이 분명해진다.
+const acceptedRef = guardQuery.orderBy(guardQuery.column("name"));
+const acceptedRefMatch: Eq<typeof acceptedRef, QueryBuilder<UsersSchema, []>> = true;
+
 export {};
