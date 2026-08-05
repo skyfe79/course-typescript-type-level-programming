@@ -54,6 +54,9 @@ projects/ledger/run-log.json
 projects/imgfx/copy.png
 # codeStep 455의 CLI가 -o로 만드는 실행 결과물이며 소스가 아닙니다.
 projects/imgfx/out.png
+# 강의 실습 산출물 (§31 tinylang — build·run이 소스 옆에 만드는 자바스크립트와 복사한 프렐류드)
+projects/tinylang/examples/*.js
+projects/tinylang/examples/prelude.ts
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

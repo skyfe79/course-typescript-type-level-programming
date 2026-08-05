@@ -1,5 +1,17 @@
-// tinylang 명령행 인자를 판별 유니온으로 바꾸고, 실행할 명령을 고르는 경계다.
-// 이번 단계는 파일을 읽지 않는다. 파싱 결과를 값으로 남겨 다음 단계의 실제 작업과 분리한다.
+// tinylang 명령행 인자를 판별 유니온으로 바꾸고, 파일과 프로세스를 다루는 효과를
+// 이 경계 한곳에 모은다. 컴파일러 본체는 문자열과 값만 주고받는 순수 함수로 남는다.
+
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import type { Program } from "./ast.ts";
+import { compile, formatDiagnostic } from "./compile.ts";
+import { emitProgram } from "./emitter.ts";
 
 export type Command = "check" | "build" | "run";
 
@@ -76,20 +88,131 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   return { kind: command, path, outPath };
 }
 
+type ProgramOutcome =
+  | { readonly ok: true; readonly program: Program }
+  | { readonly ok: false; readonly code: number };
+
+// Error가 아닌 값도 던질 수 있는 자바스크립트 경계에서 원인을 안전하게 한 줄로 바꾼다.
+function describeCause(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// 세 명령이 똑같은 읽기·컴파일·진단 출력 규칙을 거치게 해, 한 명령만 오류를
+// 다르게 처리하는 일을 막는다. 성공한 뒤에만 AST를 다음 효과 단계로 넘긴다.
+function loadProgram(path: string): ProgramOutcome {
+  let source: string;
+
+  try {
+    source = readFileSync(path, "utf8");
+  } catch (error) {
+    console.error(`소스 파일을 읽을 수 없습니다: ${path} (${describeCause(error)})`);
+    return { ok: false, code: 1 };
+  }
+
+  const result = compile(source);
+  if (!result.ok) {
+    for (const diagnostic of result.diagnostics) {
+      console.error(formatDiagnostic(diagnostic));
+    }
+    return { ok: false, code: 1 };
+  }
+
+  return { ok: true, program: result.program };
+}
+
+function defaultOutputPath(path: string): string {
+  // 마지막 .tl만 .js로 바꾸고, 다른 확장자나 확장자가 없는 이름에는 .js를 덧붙인다.
+  return path.endsWith(".tl") ? `${path.slice(0, -3)}.js` : `${path}.js`;
+}
+
+function runCheck(path: string): number {
+  const loaded = loadProgram(path);
+  if (!loaded.ok) return loaded.code;
+
+  console.log(`${path}: 오류 없음`);
+  return 0;
+}
+
+type BuildOutcome =
+  | { readonly ok: true; readonly outPath: string }
+  | { readonly ok: false; readonly code: number };
+
+function runBuild(path: string, outPath: string | null): BuildOutcome {
+  const target = outPath ?? defaultOutputPath(path);
+
+  // 표기가 달라도 같은 절대 경로를 가리킬 수 있다. 디스크를 건드리기 전에 정규화한
+  // 경로를 비교해, 컴파일 결과가 원본 소스를 덮어쓰는 일을 막는다.
+  if (resolve(path) === resolve(target)) {
+    console.error(`출력 경로가 소스 경로와 같아 덮어쓸 수 없습니다: ${target}`);
+    return { ok: false, code: 1 };
+  }
+
+  const loaded = loadProgram(path);
+  if (!loaded.ok) return loaded;
+
+  const targetDirectory = dirname(target);
+  const preludeJavaScriptSource = join(import.meta.dirname, "prelude.js");
+  const preludeTypeScriptSource = join(import.meta.dirname, "prelude.ts");
+  const preludeJavaScriptTarget = join(targetDirectory, "prelude.js");
+  const preludeTypeScriptTarget = join(targetDirectory, "prelude.ts");
+
+  try {
+    mkdirSync(targetDirectory, { recursive: true });
+    writeFileSync(target, emitProgram(loaded.program), "utf8");
+
+    // 생성 코드의 ./prelude.js는 다리 파일이고, 그 다리는 다시 실제 prelude.ts를
+    // 가리킨다. Node가 두 상대 경로를 모두 찾도록 출력 파일 옆에 함께 복사한다.
+    if (resolve(preludeJavaScriptSource) !== resolve(preludeJavaScriptTarget)) {
+      copyFileSync(preludeJavaScriptSource, preludeJavaScriptTarget);
+    }
+    if (resolve(preludeTypeScriptSource) !== resolve(preludeTypeScriptTarget)) {
+      copyFileSync(preludeTypeScriptSource, preludeTypeScriptTarget);
+    }
+  } catch (error) {
+    console.error(`출력 파일을 만들 수 없습니다: ${target} (${describeCause(error)})`);
+    return { ok: false, code: 1 };
+  }
+
+  // build와 run이 같은 함수를 쓰므로 여기서는 성공 메시지를 내지 않는다.
+  // build 명령만 dispatch에서 경로를 알리고, run은 프로그램 출력만 그대로 보인다.
+  return { ok: true, outPath: target };
+}
+
+function runRun(path: string, outPath: string | null): number {
+  const built = runBuild(path, outPath);
+  if (!built.ok) return built.code;
+
+  // 부모의 표준 입출력을 그대로 물려줘야 동기 input이 터미널이나 파이프에서 직접 읽고,
+  // 생성 프로그램의 출력도 중간 버퍼 없이 사용자가 보는 표준 출력으로 이어진다.
+  const result = spawnSync(process.execPath, [built.outPath], { stdio: "inherit" });
+
+  if (result.error !== undefined) {
+    console.error(`생성한 프로그램을 실행할 수 없습니다: ${describeCause(result.error)}`);
+    return 1;
+  }
+
+  if (result.status === null) {
+    const signal = result.signal ?? "알 수 없는 시그널";
+    console.error(`생성한 프로그램이 종료 코드 없이 끝났습니다: ${signal}`);
+    return 1;
+  }
+
+  // 실행한 프로그램의 성공과 실패를 감추지 않고 CLI 자체의 종료 코드로 그대로 전달한다.
+  return result.status;
+}
+
 export function dispatch(args: ParsedArgs): number {
   switch (args.kind) {
     case "check":
-      // codeStep 481에서 채운다
-      console.log(`check 대상: ${args.path}`);
+      return runCheck(args.path);
+    case "build": {
+      const built = runBuild(args.path, args.outPath);
+      if (!built.ok) return built.code;
+      console.log(`자바스크립트 파일을 만들었습니다: ${built.outPath}`);
       return 0;
-    case "build":
-      // codeStep 481에서 채운다
-      console.log(`build 대상: ${args.path}`);
-      return 0;
+    }
     case "run":
-      // codeStep 481에서 채운다
-      console.log(`run 대상: ${args.path}`);
-      return 0;
+      return runRun(args.path, args.outPath);
     case "usage":
       if (args.reason !== null) {
         console.error(args.reason);
