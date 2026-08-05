@@ -238,4 +238,29 @@ console.log("Merged:", toObject([["id", 1], ["name", "Ada"]] as const));
 // Sum, Join, ToObject에서 바뀐 것은 결합 방식 F와 시작값 Init뿐이다.
 // 머리를 결합하고 꼬리로 진행하는 재귀는 세 경우 모두 처음 만든 ReduceT를 그대로 사용한다.
 
+// codeStep 338 — 값 레벨 대응이 끊어지는 세 지점을 확인한다.
+
+// 값 레벨 함수는 const double = (x: number) => x * 2처럼 함수 자체를 이름에 저장할 수 있다.
+// 반면 제네릭 타입 Double은 타입 인자 N을 채워야 비로소 하나의 완성된 타입이 된다.
+// 따라서 아직 적용하지 않은 Double 자체를 다른 타입 이름에 저장할 자리는 없다.
+type Double<N extends number> = Add<N, N>;
+// @ts-expect-error - Generic type 'Double' requires 1 type argument(s).
+type StoredDouble = Double;
+
+// 값 레벨에서는 인자 하나를 먼저 고정하고 나머지를 나중에 받는 부분 적용을 만들 수 있다.
+// 제네릭 타입에는 일부 타입 인자만 채운 중간 상태가 없으므로 Add의 A만 5로 고정할 수 없다.
+// Add는 A와 B를 모두 받은 뒤에야 완성된 타입이 된다.
+// @ts-expect-error - Generic type 'Add' requires 2 type argument(s).
+type AddFive = Add<5>;
+
+// 값 레벨 함수는 다른 함수를 받아 새 함수를 반환하며 합성할 수 있다.
+// 타입 위치의 infer는 조건부 타입의 extends 절에서만 새 타입 변수를 도입할 수 있다.
+// 그러므로 함수 타입의 매개변수 자리에서 X를 추론해 두 타입 함수의 합성 결과를 반환할 수 없다.
+// @ts-expect-error - infer는 조건부 타입의 extends 절 밖에서 허용되지 않아 X도 선언되지 않는다
+type Compose<F extends TypeFn, G extends TypeFn> = (x: infer X) => CallF<G, CallF<F, X>>;
+
+// 세 오류의 문구는 서로 다르지만 뿌리는 같다. 제네릭 타입은 모든 타입 인자를 채우기 전까지
+// 완성된 타입이 아니므로 값처럼 이름에 옮기거나, 부분 적용 상태로 두거나, 새 타입 함수로 되돌릴 수 없다.
+console.log("세 지점 모두 컴파일 단계에서 막혔습니다 — 저장, 부분 적용, 함수를 반환하는 함수.");
+
 export {};
