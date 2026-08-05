@@ -196,17 +196,39 @@ export function createParser(tokens: readonly Token[]) {
 
     const token = peek();
 
-    // kind 검사로 Token 유니온이 number 변형으로 좁혀지므로 value를 단언 없이 읽어
-    // literal 노드로 옮길 수 있다. AST에는 숫자 전용 노드가 따로 없다는 점도 중요하다.
+    // 토큰에서는 number와 string이 서로 다른 갈래이고, 불리언은 keyword 갈래지만
+    // AST에서는 셋이 모두 하나의 literal 갈래로 모인다. 각 kind 검사만으로 Token
+    // 유니온이 충분히 좁혀지므로 아래 필드를 읽는 데 타입 단언은 하나도 필요 없다.
+    // 넓은 Token을 돌려주는 advance의 반환값은 읽지 않고 커서만 옮기며, 값은 이미
+    // 좁혀진 token에서 읽어 토큰의 구체적인 갈래를 끝까지 유지한다.
     if (token.kind === "number") {
       advance();
       return { kind: "literal", value: token.value };
     }
 
-    // 문자열·불리언·식별자는 다음 스텝(codeStep 465)에서 채운다.
+    if (token.kind === "string") {
+      advance();
+      return { kind: "literal", value: token.value };
+    }
+
+    if (token.kind === "keyword" && (token.word === "true" || token.word === "false")) {
+      advance();
+      // 키워드의 철자를 그대로 싣지 않고 실제 boolean 값으로 바꿔 literal에 넣는다.
+      return { kind: "literal", value: token.word === "true" };
+    }
+
+    if (token.kind === "identifier") {
+      advance();
+      // 이번 화에는 이름 자체만 식으로 만든다. 뒤따르는 괄호와 인자를 읽어 call
+      // 노드로 확장하는 일은 ep_210(codeStep 469)의 식별자 분기에서 맡는다.
+      return { kind: "identifier", name: token.name };
+    }
+
     // 지금의 throw도 의도된 임시 상태다. 렉서가 그랬듯 다음 화(ep_209)에서는 파싱
     // 오류를 예외가 아닌 ParseResult의 진단 값으로 모아 호출자에게 돌려준다.
-    throw new Error("표현식이 와야 하는 자리입니다");
+    throw new Error(
+      `표현식이 와야 하는 자리입니다 (줄 ${token.line}, 오프셋 ${token.offset})`,
+    );
   }
 
   // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
