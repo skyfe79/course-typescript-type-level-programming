@@ -59,4 +59,38 @@ const pipeResultShape: Eq<PipeResult, ({ value: string } | null)[]> = true;
 // 빈 튜플은 적용할 타입 함수가 없다는 뜻이므로 처음 입력이 곧 결과다.
 const emptyPipeIsInput: Eq<Pipe<boolean, []>, boolean> = true;
 
+// codeStep 350 — 여러 타입 함수 체인으로 Pipe 테스트하기
+
+// apply 안에 객체 타입 리터럴을 직접 쓰면 TS2526이 발생하므로 객체 모양에 이름을 붙여 input을 넘긴다.
+type Keyed<T> = { id: string; value: T };
+
+interface KeyedT extends TypeFn {
+  readonly apply: Keyed<this["input"]>;
+}
+
+type FullChain = Pipe<number, [BoxT, ArrayOfT, KeyedT]>;
+type ManualChain = Apply<KeyedT, Apply<ArrayOfT, Apply<BoxT, number>>>;
+
+// Pipe는 같은 순서를 안쪽부터 직접 중첩한 Apply 호출을 읽기 쉬운 튜플 하나로 옮긴다.
+const pipeMatchesNested: Eq<FullChain, ManualChain> = true;
+const fullChainShape: Eq<FullChain, { id: string; value: { value: number }[] }> = true;
+
+// 타입 함수의 나열 순서를 바꾸면 각 단계가 받는 입력이 달라져 최종 객체 모양도 달라진다.
+type SwappedOrder = Pipe<number, [ArrayOfT, BoxT, KeyedT]>;
+const swappedShape: Eq<SwappedOrder, { id: string; value: { value: number[] } }> = true;
+// @ts-expect-error - 나열 순서가 달라 결과 타입이 같지 않다
+const orderMatters: Eq<FullChain, SwappedOrder> = true;
+
+// 런타임 함수도 타입 수준의 FullChain과 같은 왼쪽부터의 순서로 값을 변환한다.
+const box = <T>(x: T) => ({ value: x });
+const arrayOf = <T>(x: T) => [x];
+const keyed = <T>(x: T) => ({ id: "auto", value: x });
+
+function pipeRuntime<T>(input: T, fns: Array<(x: any) => any>): unknown {
+  return fns.reduce((acc, fn) => fn(acc), input as unknown);
+}
+
+const n = Number(process.argv[2] ?? "3");
+console.log(pipeRuntime(n, [box, arrayOf, keyed]));
+
 export {};
