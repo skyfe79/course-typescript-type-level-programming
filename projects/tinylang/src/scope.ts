@@ -35,3 +35,32 @@ export function declare(scope: Scope, name: string, binding: Binding): boolean {
   scope.bindings.set(name, binding);
   return true;
 }
+
+// Map.get의 undefined를 함수 경계 밖으로 그대로 내보내지 않고, 성공과 실패에 서로
+// 다른 kind를 붙인 값으로 바꾼다. 호출하는 쪽은 kind를 확인해야만 binding에 접근할
+// 수 있으므로 이름을 찾지 못한 경우를 잊고 다음 단계로 넘어갈 수 없다.
+export type LookupResult =
+  | { readonly kind: "found"; readonly binding: Binding }
+  | { readonly kind: "not-found"; readonly name: string };
+
+// 첫 인자를 Scope | null로 받으면 반복문 안의 current와 current.parent가 계속 같은
+// 타입을 유지한다. 덕분에 null도 체인의 끝이나 처음 값으로 자연스럽게 다루며, 재귀
+// 호출이나 null만 처리하는 별도 헬퍼 없이 한 함수에서 조회를 마칠 수 있다.
+export function lookup(scope: Scope | null, name: string): LookupResult {
+  let current = scope;
+
+  while (current !== null) {
+    const binding = current.bindings.get(name);
+
+    // 현재 스코프에서 찾자마자 반환하므로 체인에서 먼저 만난 스코프가 이긴다. 이것이
+    // 안쪽 선언이 바깥쪽의 같은 이름을 가리는 섀도잉 규칙이다. Map.get이 준 undefined는
+    // 이 자리에서만 검사하고, 함수 바깥에는 명시적인 LookupResult만 내보낸다.
+    if (binding !== undefined) return { kind: "found", binding };
+
+    current = current.parent;
+  }
+
+  // 실패 갈래에는 binding 대신 찾으려던 이름을 보존한다. 이후 타입 검사나 진단 단계는
+  // 호출 당시의 name을 따로 전달받지 않아도 이 값만으로 오류 메시지를 만들 수 있다.
+  return { kind: "not-found", name };
+}
