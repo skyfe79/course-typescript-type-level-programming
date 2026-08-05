@@ -55,4 +55,31 @@ const nested: Nested = [[[5, 5]]];
 
 console.log("합성 결과:", [[5, 5]]);
 
+// codeStep 347 — 부분 적용된 타입 함수 만들기
+
+// 앞서 만든 튜플 산술을 이 파일에서도 스스로 완결되도록 다시 선언한다.
+// 목표 길이에 닿을 때까지 자리표시자를 누산기에 쌓으면 숫자 리터럴 N을 튜플 길이로 표현할 수 있다.
+type BuildTuple<N extends number, Acc extends unknown[] = []> =
+  Acc["length"] extends N ? Acc : BuildTuple<N, [...Acc, unknown]>;
+
+// 숫자 두 개를 각각 튜플로 만든 뒤 이어 붙이면, 이어 붙인 튜플의 길이가 덧셈 결과다.
+type Add<A extends number, B extends number> =
+  [...BuildTuple<A>, ...BuildTuple<B>]["length"];
+
+// A는 인터페이스를 선언하는 시점에 이미 닫혀 있고, input 자리만 나중에 채워진다.
+interface AddBy<A extends number> extends TypeFn {
+  readonly apply: Add<A, this["input"] extends number ? this["input"] : never>;
+}
+
+// 부분 적용된 결과는 이름 하나에 저장되는 완성된 타입 함수다.
+type AddFive = AddBy<5>;
+type Result2 = Apply<AddFive, 3>;
+
+const addFiveIsEight: Eq<Result2, 8> = true;
+// @ts-expect-error - AddBy<5>에 3을 적용한 결과는 9가 아니라 8이다
+const addFiveIsNotNine: Eq<Result2, 9> = true;
+const sameAsDirectAdd: Eq<Result2, Add<5, 3>> = true;
+
+console.log("AddBy(5)(3) =", 8);
+
 export {};
