@@ -33,4 +33,41 @@ const name = process.argv[2] ?? "world";
 console.log(greeting(name));
 console.log(apiRoute("users"));
 
+// codeStep 352 — 유니온 보간과 결과 타입 확인하기
+
+// 템플릿 리터럴 타입의 각 자리에 유니온을 넣으면 가능한 모든 조합의 유니온이 만들어진다.
+type Method = "GET" | "POST" | "DELETE";
+type Resource = "users" | "orders";
+
+type Endpoint = `${Method} /${Resource}`;
+
+// 여섯 멤버를 직접 적은 유니온과 비교해 빠지거나 더해진 조합 없이 정확히 계산되었는지 확인한다.
+type ExpectedEndpoint =
+  | "GET /users"
+  | "GET /orders"
+  | "POST /users"
+  | "POST /orders"
+  | "DELETE /users"
+  | "DELETE /orders";
+
+const endpointHasAllCombinations: Eq<Endpoint, ExpectedEndpoint> = true;
+
+// @ts-expect-error - DELETE /orders가 빠진 다섯 멤버 유니온은 Endpoint와 같지 않다
+const endpointNeedsEveryCombination: Eq<
+  Endpoint,
+  Exclude<ExpectedEndpoint, "DELETE /orders">
+> = true;
+
+// as const는 배열 원소를 string으로 넓히지 않고 각 문자열 리터럴의 유니온으로 보존한다.
+const methods = ["GET", "POST", "DELETE"] as const;
+const resources = ["users", "orders"] as const;
+
+// 값 공간에서도 두 배열의 데카르트 곱을 만들어 타입 공간에서 계산한 여섯 조합과 나란히 확인한다.
+// map 콜백의 템플릿 문자열 결과는 string으로 넓어지므로, 각 결과가 계산된 Endpoint임을 밝혀 준다.
+const endpoints: Endpoint[] = methods.flatMap((m) =>
+  resources.map((r) => `${m} /${r}` as Endpoint)
+);
+
+console.log(endpoints);
+
 export {};
