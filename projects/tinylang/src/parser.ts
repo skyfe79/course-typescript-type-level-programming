@@ -1,7 +1,24 @@
 // 토큰 배열 위를 한 번만 앞으로 이동하면서, 연산자 우선순위가 드러나는 식 트리를 만든다.
 
-import type { Expr } from "./ast.ts";
-import type { Operator, Punct, Token, TokenKind } from "./tokens.ts";
+import type { Block, Expr, IfStatement, Statement, TypeName } from "./ast.ts";
+import { makeDiagnostic } from "./diagnostics.ts";
+import type { Diagnostic } from "./diagnostics.ts";
+import type { Keyword, Operator, Punct, Token, TokenKind } from "./tokens.ts";
+
+// 1부(ep_092)에서 배운 Result<T> 패턴을 이 프로젝트에도 의도적으로 다시 쓴다.
+// 렉서는 diagnostics 목록을 모으지만, 파서는 첫 실패의 Diagnostic 하나에서 곧바로 멈춘다.
+export type ParseResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly diagnostic: Diagnostic };
+
+// 실패 갈래에는 T가 나타나지 않으므로 ParseResult<never>는 Token, Expr, Statement 등
+// 어떤 ParseResult 자리에도 그대로 흐를 수 있다. 호출자는 실패를 다시 만들지 않고 반환한다.
+function fail(token: Token, message: string): ParseResult<never> {
+  return {
+    ok: false,
+    diagnostic: makeDiagnostic("error", message, token.offset, token.line),
+  };
+}
 
 // 파서마다 자기 커서를 갖게 하면 서로 다른 토큰 배열을 파싱하는 작업이 전역 상태를
 // 공유하지 않는다. 다음 화에서 문 파싱 함수와 진단 수집 상태가 늘어나더라도 모두 이
@@ -13,6 +30,14 @@ export function createParser(tokens: readonly Token[]) {
   // 마지막 eof를 계속 돌려주면 각 파싱 함수에서 배열 범위를 거듭 검사하지 않아도 된다.
   function peek(): Token {
     return tokens[Math.min(current, tokens.length - 1)];
+  }
+
+  // 대입문과 식 문은 모두 식별자로 시작할 수 있다. 예를 들어 `x = 1;`과
+  // `x + 1;`은 첫 토큰만 보고는 구분할 수 없으므로, 현재 토큰을 소비하지 않은 채
+  // 바로 다음 토큰까지 미리 본다. peek과 마찬가지로 배열 끝에서는 마지막 eof에
+  // 인덱스를 고정해, 짧은 입력에서도 범위를 벗어나지 않게 한다.
+  function peekNext(): Token {
+    return tokens[Math.min(current + 1, tokens.length - 1)];
   }
 
   // advance가 커서를 옮긴 직후 소비한 토큰을 다시 확인할 때 쓴다. 첫 토큰을 소비하기
@@ -40,6 +65,18 @@ export function createParser(tokens: readonly Token[]) {
     return peek().kind === kind;
   }
 
+  // kind만 확인하는 check로는 `if`와 `while`, `}`와 `;`를 서로 구별할 수 없다.
+  // 문법을 소비하기 전에 구체적인 키워드와 구두점을 미리 볼 수 있게 값까지 비교한다.
+  function checkKeyword(word: Keyword): boolean {
+    const token = peek();
+    return token.kind === "keyword" && token.word === word;
+  }
+
+  function checkPunct(char: Punct): boolean {
+    const token = peek();
+    return token.kind === "punct" && token.char === char;
+  }
+
   // boolean을 돌려준 뒤 previous()를 읽는 방식은 previous()의 타입을 넓은 Token
   // 유니온으로 되돌린다. 그러면 토큰의 op를 읽기 위해 다시 좁히거나 단언해야 한다.
   // 대신 실제로 찾은 O를 반환하면 호출 위치에서 "+" | "-" 같은 좁은 타입이 그대로
@@ -49,6 +86,19 @@ export function createParser(tokens: readonly Token[]) {
     if (token.kind !== "operator") return undefined;
 
     const found = candidates.find((candidate) => candidate === token.op);
+    if (found === undefined) return undefined;
+
+    advance();
+    return found;
+  }
+
+  // matchOperator와 똑같이, 찾은 키워드 자체를 반환해 K의 좁은 타입을 호출자까지
+  // 운반한다. boolean만 반환하고 previous()를 읽는 방식과 달리 타입 단언이 필요 없다.
+  function matchKeyword<K extends Keyword>(...candidates: readonly K[]): K | undefined {
+    const token = peek();
+    if (token.kind !== "keyword") return undefined;
+
+    const found = candidates.find((candidate) => candidate === token.word);
     if (found === undefined) return undefined;
 
     advance();
@@ -66,132 +116,212 @@ export function createParser(tokens: readonly Token[]) {
     return true;
   }
 
-  function expectPunct(char: Punct): Token {
+  // matchKeyword는 있으면 소비하고 알려 주며, expectKeyword는 반드시 있어야 하는 경계를 확인한다.
+  function expectKeyword(word: Keyword): ParseResult<Token> {
     const token = peek();
-    if (token.kind === "punct" && token.char === char) {
-      return advance();
+    if (token.kind === "keyword" && token.word === word) {
+      return { ok: true, value: advance() };
     }
 
-    // 이 throw는 닫는 경계를 반드시 확인하기 위한 의도된 임시 상태다. 다음 화
-    // (ep_209, codeStep 467)에서는 예외를 던지는 대신 ParseResult와 Diagnostic 값에
-    // 현재 위치를 담아, 호출자가 파싱 오류를 데이터로 다룰 수 있게 바꾼다.
-    throw new Error(`'${char}' 구두점이 필요합니다 (줄 ${token.line}, 오프셋 ${token.offset})`);
+    return fail(token, `'${word}' 키워드가 필요합니다`);
+  }
+
+  // matchOperator는 있으면 소비하고 알려 주며, expectOperator는 반드시 있어야 하는 경계를 확인한다.
+  function expectOperator(op: Operator): ParseResult<Token> {
+    const token = peek();
+    if (token.kind === "operator" && token.op === op) {
+      return { ok: true, value: advance() };
+    }
+
+    return fail(token, `'${op}' 연산자가 필요합니다`);
+  }
+
+  function expectPunct(char: Punct): ParseResult<Token> {
+    const token = peek();
+    if (token.kind === "punct" && token.char === char) {
+      return { ok: true, value: advance() };
+    }
+
+    // 반드시 있어야 하는 경계가 빠지면 예외 대신 현재 위치를 담은 실패 값을 돌려준다.
+    return fail(token, `'${char}' 구두점이 필요합니다`);
+  }
+
+  function expectIdentifier(): ParseResult<string> {
+    const token = peek();
+    if (token.kind === "identifier") {
+      // advance()의 반환 타입은 다시 넓은 Token이다. 이름은 kind 검사로 이미 좁혀진
+      // token에서 읽고, advance는 커서를 옮기는 용도로만 써서 단언을 피한다.
+      advance();
+      return { ok: true, value: token.name };
+    }
+
+    return fail(token, "식별자가 필요합니다");
+  }
+
+  function parseTypeAnnotation(): ParseResult<TypeName> {
+    const token = peek();
+    if (
+      token.kind === "identifier"
+      && (token.name === "number" || token.name === "string" || token.name === "boolean")
+    ) {
+      advance();
+      // 문자열 비교가 token.name을 TypeName의 세 리터럴 중 하나로 좁혀 준다.
+      return { ok: true, value: token.name };
+    }
+
+    return fail(token, "타입 이름(number, string, boolean)이 필요합니다");
   }
 
   // 괄호 안에서는 바깥에서 내려오던 우선순위를 이어 가지 않고 가장 낮은 or부터
   // 다시 시작해야 한다. 그래서 그룹핑을 만드는 이번 스텝에, parsePrimary가 우선순위
   // 체인의 꼭대기를 다시 부를 수 있는 완전한 식의 진입점 이름이 함께 생긴다.
-  function parseExpression(): Expr {
+  function parseExpression(): ParseResult<Expr> {
     return parseOr();
   }
 
   // 아래 여섯 함수는 모두 "더 강한 레벨을 먼저 읽고, 같은 레벨 연산자를 while로
   // 이어 붙인다"라는 패턴을 반복한다. 지금은 이 반복 자체가 우선순위 층을 눈에
   // 보이게 하는 교육 포인트이므로 공통 함수로 추상화하지 않는다.
-  function parseOr(): Expr {
-    let left = parseAnd();
+  function parseOr(): ParseResult<Expr> {
+    const first = parseAnd();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("||");
       if (operator === undefined) break;
 
       const right = parseAnd();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseAnd(): Expr {
-    let left = parseEquality();
+  function parseAnd(): ParseResult<Expr> {
+    const first = parseEquality();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("&&");
       if (operator === undefined) break;
 
       const right = parseEquality();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseEquality(): Expr {
-    let left = parseComparison();
+  function parseEquality(): ParseResult<Expr> {
+    const first = parseComparison();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("==", "!=");
       if (operator === undefined) break;
 
       const right = parseComparison();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseComparison(): Expr {
-    let left = parseAdditive();
+  function parseComparison(): ParseResult<Expr> {
+    const first = parseAdditive();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("<", "<=", ">", ">=");
       if (operator === undefined) break;
 
       const right = parseAdditive();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseAdditive(): Expr {
-    let left = parseMultiplicative();
+  function parseAdditive(): ParseResult<Expr> {
+    const first = parseMultiplicative();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("+", "-");
       if (operator === undefined) break;
 
       const right = parseMultiplicative();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseMultiplicative(): Expr {
-    let left = parseUnary();
+  function parseMultiplicative(): ParseResult<Expr> {
+    const first = parseUnary();
+    if (!first.ok) return first;
+
+    let left = first.value;
 
     while (true) {
       const operator = matchOperator("*", "/", "%");
       if (operator === undefined) break;
 
       const right = parseUnary();
-      left = { kind: "binary", operator, left, right };
+      if (!right.ok) return right;
+
+      left = { kind: "binary", operator, left, right: right.value };
     }
 
-    return left;
+    return { ok: true, value: left };
   }
 
-  function parseUnary(): Expr {
+  function parseUnary(): ParseResult<Expr> {
     const operator = matchOperator("-", "!");
     if (operator !== undefined) {
       // 이항 레벨은 while로 왼쪽 결합을 만들지만, 피연산자 앞에 붙는 전위 단항은
       // 오른쪽 결합이다. 자기 자신을 다시 불러 - -3도 안쪽 단항부터 차례로 묶는다.
       const operand = parseUnary();
-      return { kind: "unary", operator, operand };
+      if (!operand.ok) return operand;
+
+      return { ok: true, value: { kind: "unary", operator, operand: operand.value } };
     }
 
     return parsePrimary();
   }
 
-  function parsePrimary(): Expr {
+  function parsePrimary(): ParseResult<Expr> {
     if (matchPunct("(")) {
       // 괄호는 묶는 방법만 정한다. 트리가 완성되면 그 묶음은 자식 관계 자체에 이미
       // 기록되므로 group 노드를 덧붙이지 않고 안쪽 식을 그대로 돌려준다. Expr에
       // group 변형이 없는 이유도 같다.
       const inner = parseExpression();
-      expectPunct(")");
-      return inner;
+      if (!inner.ok) return inner;
+
+      const closed = expectPunct(")");
+      if (!closed.ok) return closed;
+
+      return { ok: true, value: inner.value };
     }
 
     const token = peek();
@@ -203,32 +333,193 @@ export function createParser(tokens: readonly Token[]) {
     // 좁혀진 token에서 읽어 토큰의 구체적인 갈래를 끝까지 유지한다.
     if (token.kind === "number") {
       advance();
-      return { kind: "literal", value: token.value };
+      return { ok: true, value: { kind: "literal", value: token.value } };
     }
 
     if (token.kind === "string") {
       advance();
-      return { kind: "literal", value: token.value };
+      return { ok: true, value: { kind: "literal", value: token.value } };
     }
 
     if (token.kind === "keyword" && (token.word === "true" || token.word === "false")) {
       advance();
       // 키워드의 철자를 그대로 싣지 않고 실제 boolean 값으로 바꿔 literal에 넣는다.
-      return { kind: "literal", value: token.word === "true" };
+      return { ok: true, value: { kind: "literal", value: token.word === "true" } };
     }
 
     if (token.kind === "identifier") {
       advance();
       // 이번 화에는 이름 자체만 식으로 만든다. 뒤따르는 괄호와 인자를 읽어 call
       // 노드로 확장하는 일은 ep_210(codeStep 469)의 식별자 분기에서 맡는다.
-      return { kind: "identifier", name: token.name };
+      return { ok: true, value: { kind: "identifier", name: token.name } };
     }
 
-    // 지금의 throw도 의도된 임시 상태다. 렉서가 그랬듯 다음 화(ep_209)에서는 파싱
-    // 오류를 예외가 아닌 ParseResult의 진단 값으로 모아 호출자에게 돌려준다.
-    throw new Error(
-      `표현식이 와야 하는 자리입니다 (줄 ${token.line}, 오프셋 ${token.offset})`,
-    );
+    // 식이 될 수 없는 토큰도 예외를 일으키지 않고 위치가 분리된 진단 값이 된다.
+    return fail(token, "표현식이 와야 하는 자리입니다");
+  }
+
+  function parseStatement(): ParseResult<Statement> {
+    if (checkPunct("{")) return parseBlock();
+    if (checkKeyword("if")) return parseIfStatement();
+    if (checkKeyword("while")) return parseWhileStatement();
+    if (checkKeyword("let")) return parseVarDecl();
+    if (checkKeyword("return")) return parseReturnStatement();
+
+    const token = peek();
+    const next = peekNext();
+    if (token.kind === "identifier" && next.kind === "operator" && next.op === "=") {
+      return parseAssignment();
+    }
+
+    const expression = parseExpression();
+    if (!expression.ok) return expression;
+
+    const semicolon = expectPunct(";");
+    if (!semicolon.ok) return semicolon;
+
+    return { ok: true, value: { kind: "exprStatement", expression: expression.value } };
+  }
+
+  function parseBlock(): ParseResult<Block> {
+    const opened = expectPunct("{");
+    if (!opened.ok) return opened;
+
+    const statements: Statement[] = [];
+
+    // eof 검사 없이 `}`만 기다리면 닫는 중괄호가 빠진 입력에서 같은 eof를 보며
+    // 반복할 수 있다. 입력 끝에서는 반복을 멈추고 아래 expectPunct의 실패 값을 돌려준다.
+    while (!checkPunct("}") && !isAtEnd()) {
+      const statement = parseStatement();
+      if (!statement.ok) return statement;
+
+      statements.push(statement.value);
+    }
+
+    const closed = expectPunct("}");
+    if (!closed.ok) return closed;
+
+    return { ok: true, value: { kind: "block", statements } };
+  }
+
+  function parseIfStatement(): ParseResult<IfStatement> {
+    const keyword = expectKeyword("if");
+    if (!keyword.ok) return keyword;
+
+    const opened = expectPunct("(");
+    if (!opened.ok) return opened;
+
+    const condition = parseExpression();
+    if (!condition.ok) return condition;
+
+    const closed = expectPunct(")");
+    if (!closed.ok) return closed;
+
+    const thenBranch = parseBlock();
+    if (!thenBranch.ok) return thenBranch;
+
+    let elseBranch: Block | IfStatement | null = null;
+    if (matchKeyword("else") !== undefined) {
+      // else 다음이 if라면 parseIfStatement가 그 키워드부터 다시 소비한다. 그래서
+      // elseBranch가 Block뿐 아니라 IfStatement도 허용하며, 체인이 AST에 그대로 남는다.
+      const parsedElse = checkKeyword("if") ? parseIfStatement() : parseBlock();
+      if (!parsedElse.ok) return parsedElse;
+
+      elseBranch = parsedElse.value;
+    }
+
+    return {
+      ok: true,
+      value: {
+        kind: "if",
+        condition: condition.value,
+        thenBranch: thenBranch.value,
+        elseBranch,
+      },
+    };
+  }
+
+  function parseWhileStatement(): ParseResult<Statement> {
+    const keyword = expectKeyword("while");
+    if (!keyword.ok) return keyword;
+
+    const opened = expectPunct("(");
+    if (!opened.ok) return opened;
+
+    const condition = parseExpression();
+    if (!condition.ok) return condition;
+
+    const closed = expectPunct(")");
+    if (!closed.ok) return closed;
+
+    const body = parseBlock();
+    if (!body.ok) return body;
+
+    return {
+      ok: true,
+      value: { kind: "while", condition: condition.value, body: body.value },
+    };
+  }
+
+  function parseVarDecl(): ParseResult<Statement> {
+    const keyword = expectKeyword("let");
+    if (!keyword.ok) return keyword;
+
+    const name = expectIdentifier();
+    if (!name.ok) return name;
+
+    const colon = expectPunct(":");
+    if (!colon.ok) return colon;
+
+    const declaredType = parseTypeAnnotation();
+    if (!declaredType.ok) return declaredType;
+
+    const equals = expectOperator("=");
+    if (!equals.ok) return equals;
+
+    const initializer = parseExpression();
+    if (!initializer.ok) return initializer;
+
+    const semicolon = expectPunct(";");
+    if (!semicolon.ok) return semicolon;
+
+    return {
+      ok: true,
+      value: {
+        kind: "varDecl",
+        name: name.value,
+        declaredType: declaredType.value,
+        initializer: initializer.value,
+      },
+    };
+  }
+
+  function parseAssignment(): ParseResult<Statement> {
+    const name = expectIdentifier();
+    if (!name.ok) return name;
+
+    const equals = expectOperator("=");
+    if (!equals.ok) return equals;
+
+    const value = parseExpression();
+    if (!value.ok) return value;
+
+    const semicolon = expectPunct(";");
+    if (!semicolon.ok) return semicolon;
+
+    return { ok: true, value: { kind: "assignment", name: name.value, value: value.value } };
+  }
+
+  function parseReturnStatement(): ParseResult<Statement> {
+    const keyword = expectKeyword("return");
+    if (!keyword.ok) return keyword;
+
+    const value = parseExpression();
+    if (!value.ok) return value;
+
+    const semicolon = expectPunct(";");
+    if (!semicolon.ok) return semicolon;
+
+    return { ok: true, value: { kind: "return", value: value.value } };
   }
 
   // 이번 스텝의 각 층을 따로 관찰할 수 있게 공개한다. 완전한 식은 parseExpression로
@@ -243,5 +534,9 @@ export function createParser(tokens: readonly Token[]) {
     parseMultiplicative,
     parseUnary,
     parsePrimary,
+    parseStatement,
+    parseBlock,
+    parseIfStatement,
+    parseWhileStatement,
   };
 }
