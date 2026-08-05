@@ -12,7 +12,7 @@
 // devDependencies의 @types/pngjs가 제공한다. 이제 png.width는 number, png.data는 Buffer로 잡히고,
 // colorType: 6도 0 | 2 | 4 | 6 중 하나로 검사된다.
 import { PNG } from "pngjs";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 // 이미지 스테이지가 주고받을 수 있는 픽셀 포맷을 하나의 닫힌 집합으로 고정한다.
 // 각 태그는 지난 시간에 고정한 PNG colorType과 정확히 하나씩 짝지어진다: RGBA8→6, RGB8→2, Gray8→0.
@@ -68,6 +68,7 @@ requiresRgba(rgba); // 통과 — 둘 다 ImageBuffer<"RGBA8">
 // 실행 위치가 아니라 이 모듈의 위치를 기준으로 잡아 저장소 루트에서도 같은 파일을 읽고 쓴다.
 const INPUT_URL = new URL("./photo.png", import.meta.url);
 const OUTPUT_URL = new URL("./copy.png", import.meta.url);
+const OUT_DIR = new URL("./out/", import.meta.url);
 
 // codeStep 428 — 파이프라인의 각 단계를 함수가 아니라 평범한 데이터로 표현한다.
 // 함수로만 보관하면 실제로 호출해 보기 전에는 무슨 작업인지 알 수 없어서,
@@ -370,6 +371,23 @@ const contrastKernel = (factor: number): PixelKernel<"RGBA8", "RGBA8"> =>
     a,
   ];
 
+// codeStep 436 — 같은 범위 밖 값을 두 정수 배열에 써서 클램핑과 래핑의 차이를 대조한다.
+function clampingContrast(): string {
+  const clamped = new Uint8ClampedArray(2);
+  const wrapped = new Uint8Array(2);
+
+  // Clamped 배열은 이미지 채널에 알맞게 0~255로 자르고, 일반 Uint8 배열은 256을 기준으로 감싼다.
+  clamped[0] = 280;
+  clamped[1] = -20;
+  wrapped[0] = 280;
+  wrapped[1] = -20;
+
+  return (
+    `Uint8ClampedArray 280→${clamped[0]}, -20→${clamped[1]} / ` +
+    `Uint8Array 280→${wrapped[0]}, -20→${wrapped[1]}`
+  );
+}
+
 function readPng(path: string | URL) {
   const png = PNG.sync.read(readFileSync(path));
 
@@ -389,6 +407,14 @@ function writePng(
   png.data.set(data);
   writeFileSync(path, PNG.sync.write(png, { colorType: 6 }));
 }
+
+function saveImage(name: string, image: ImageBuffer<"RGBA8">): void {
+  mkdirSync(OUT_DIR, { recursive: true });
+  writePng(new URL(`${name}.png`, OUT_DIR), image.width, image.height, image.data);
+  console.log(`저장 out/${name}.png`);
+}
+
+const grayToRgba: PixelKernel<"Gray8", "RGBA8"> = ([v]) => [v, v, v, 255];
 
 function main(): void {
   // 직렬화 결과에는 data·width·height만 있고 타입 전용 팬텀 필드 __format은 어디에도 없다.
@@ -432,6 +458,29 @@ function main(): void {
   console.log(`반전 픽셀 ${Array.from(invertStage().run(samplePixel).data)}`);
   console.log(`밝기 50 픽셀 ${Array.from(brightnessStage(50).run(samplePixel).data)}`);
   console.log(`대비 1.5 픽셀 ${Array.from(contrastStage(1.5).run(samplePixel).data)}`);
+
+  // codeStep 436 — 커널에 별도 Math.min/Math.max가 없어도 출력 배열이 범위를 보정함을 확인한다.
+  // 빨강이 이미 230인 픽셀에 밝기 50을 더하면 280이 되어 그 채널 하나만 범위를 넘는다.
+  // 나머지 두 채널은 그대로 더해지므로, 잘린 자리가 어디인지 출력에서 바로 가려진다.
+  const brightPixel: ImageBuffer<"RGBA8"> = makeImageBuffer(
+    new Uint8ClampedArray([230, 10, 40, 255]),
+    1,
+    1,
+  );
+  console.log(`밝기 50 넘침 픽셀 ${Array.from(brightnessStage(50).run(brightPixel).data)}`);
+  console.log(`클램핑 대조 ${clampingContrast()}`);
+
+  const decodedGrayscale = grayscaleStage().run(decodedImage);
+  console.log(
+    `실제 PNG 그레이스케일 크기 ${decodedImage.width}x${decodedImage.height} -> ` +
+      `${decodedGrayscale.width}x${decodedGrayscale.height} bytes=${decodedImage.data.length} -> ` +
+      `${decodedGrayscale.data.length}`,
+  );
+
+  saveImage("grayscale", mapPixels(decodedGrayscale, "RGBA8", grayToRgba));
+  saveImage("invert", invertStage().run(decodedImage));
+  saveImage("brightness", brightnessStage(50).run(decodedImage));
+  saveImage("contrast", contrastStage(1.5).run(decodedImage));
 }
 
 main();
