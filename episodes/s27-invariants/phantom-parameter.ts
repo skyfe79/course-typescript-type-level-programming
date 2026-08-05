@@ -70,4 +70,61 @@ function tryToUseFeetAsMeters(): void {
 // 단언 전과 후가 같은 숫자인지 실제 실행으로 확인한다. 출력에는 __unit도 __tag도 없고 5만 남는다.
 console.log(m);
 
+// codeStep 386 — 1부 브랜드 타입과 비교하기
+
+// 브랜드 방식은 단위마다 교차 타입을 하나씩 새로 선언하고, 필수 __brand로 서로를 구별한다.
+type MetersBrand = number & { readonly __brand: "meters" };
+type FeetBrand = number & { readonly __brand: "feet" };
+
+// 예를 들어 세 번째 단위를 추가하면 브랜드 쪽에는 완성된 교차 타입을 하나 더 만들어야 한다.
+type KilometersBrand = number & { readonly __brand: "kilometers" };
+
+// 팬텀 매개변수 쪽은 새 태그만 정의하고 이미 만든 Measurement<Unit>에 끼워 넣어 재사용한다.
+interface Kilometers {
+  readonly __tag: "kilometers";
+}
+
+type KilometersMeasurement = Measurement<Kilometers>;
+
+// 선언 형태는 다르지만, 두 방식 모두 실제 값에는 없는 표식을 타입 구조에 심어 잘못된 대입을 막는다.
+function compareRejectedAssignments(): void {
+  // @ts-expect-error - 팬텀 매개변수 방식은 Feet를 Meters로 사용할 수 없다
+  const phantomMistake: Measurement<Meters> = feet(1);
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/phantom-parameter.ts(91,9): error TS2322: Type 'Measurement<Feet>' is not assignable to type 'Measurement<Meters>'.
+  //   Type 'Measurement<Feet>' is not assignable to type '{ readonly __unit?: Meters | undefined; }'.
+  //     Types of property '__unit' are incompatible.
+  //       Type 'Feet | undefined' is not assignable to type 'Meters | undefined'.
+  //         Type 'Feet' is not assignable to type 'Meters'.
+  //           Types of property '__tag' are incompatible.
+  //             Type '"feet"' is not assignable to type '"meters"'.
+
+  const brandedFeet = 1 as FeetBrand;
+  // @ts-expect-error - 브랜드 방식도 FeetBrand를 MetersBrand로 사용할 수 없다
+  const brandMistake: MetersBrand = brandedFeet;
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/phantom-parameter.ts(103,9): error TS2322: Type 'FeetBrand' is not assignable to type 'MetersBrand'.
+  //   Type 'FeetBrand' is not assignable to type '{ readonly __brand: "meters"; }'.
+  //     Types of property '__brand' are incompatible.
+  //       Type '"feet"' is not assignable to type '"meters"'.
+}
+
+// 여기에는 두 방식의 실제 차이가 하나 있다.
+// Measurement의 __unit은 옵셔널이라 숫자를 직접 넣을 수 있지만, 예제에서는 의미를 보존하려고 생성 함수를 쓴다.
+const directNumberAllowed: Measurement<Meters> = 5;
+
+function compareOptionalAndRequiredMarkers(): void {
+  // 브랜드의 __brand는 필수이므로 표식 없는 숫자를 직접 넣는 순간 오류가 난다.
+  // @ts-expect-error - number에는 필수 __brand가 없다
+  const directNumberRejected: MetersBrand = 5;
+  // 실측 진단(@ts-expect-error 한 줄만 제거했을 때):
+  // episodes/s27-invariants/phantom-parameter.ts(118,9): error TS2322: Type 'number' is not assignable to type 'MetersBrand'.
+  //   Type 'number' is not assignable to type '{ readonly __brand: "meters"; }'.
+}
+
+// 새로 늘린 세 번째 단위도 양쪽 모두에서 기존 단위와 구별된다는 사실을 컴파일러가 확인한다.
+// 브랜드 쪽은 교차 타입을 새로 적어야 했고, 팬텀 쪽은 태그 하나만 더해 제네릭을 다시 썼다.
+const kilometersBrandIsDistinct: Eq<KilometersBrand, MetersBrand> = false;
+const kilometersMeasurementIsDistinct: Eq<KilometersMeasurement, Measurement<Meters>> = false;
+
 export {};
