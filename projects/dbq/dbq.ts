@@ -38,15 +38,21 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   // 빠짐없이 다룰 수 있도록 operator를 넓은 string이 아니라 ComparisonOp로 제한한다.
   // codeStep 378에서는 rows가 이 배열을 순회해 실제 행도 같은 조건으로 거른다.
   private filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[];
+  private order?: { column: keyof Row; direction: "asc" | "desc" };
+  private limitCount?: number;
 
   constructor(
     tableName: string,
     selectedCols: Selected = [] as unknown as Selected,
     filters: { column: keyof Row; operator: ComparisonOp; value: unknown }[] = [],
+    order?: { column: keyof Row; direction: "asc" | "desc" },
+    limitCount?: number,
   ) {
     this.tableName = tableName;
     this.selectedCols = selectedCols;
     this.filters = filters;
+    this.order = order;
+    this.limitCount = limitCount;
   }
 
   // select는 Row에 실제로 존재하는 컬럼만 가변 인자로 받고, 기존 선택 뒤에 새 선택을 이어 붙인다.
@@ -58,6 +64,15 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
       // select는 새 인스턴스를 반환한다. 기존 조건의 사본을 생성자에 넘기지 않으면
       // where(...).select(...)가 오류 없이 실행되면서 조건만 조용히 사라지게 된다.
       [...this.filters],
+      // orderBy도 같은 이유로 select가 만드는 새 인스턴스에 현재 정렬 상태를 넘겨야 한다.
+      // 넘기지 않으면 orderBy(...).select(...)가 오류 없이 실행되면서 정렬만 조용히 사라진다.
+      // filters는 push로 같은 배열에 조건을 쌓으므로 사본을 넘기지만, order는 orderBy를
+      // 호출할 때마다 새 객체로 교체되는 값이라 그대로 전달해도 앞 빌더의 배열 상태를 공유하지 않는다.
+      this.order,
+      // limit도 select가 만드는 새 인스턴스에 현재 제한 개수를 넘겨야 한다.
+      // codeStep 376의 filters와 codeStep 380의 order가 그랬듯이, 넘기지 않으면
+      // limit(...).select(...)에서 오류 없이 실행되면서 개수 제한만 조용히 사라진다.
+      this.limitCount,
     );
   }
 
@@ -67,6 +82,34 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
   where<K extends keyof Row>(column: K, operator: ColumnOperators<Row, K>, value: Row[K]): this {
     this.filters.push({ column, operator, value });
     return this;
+  }
+
+  // 아래 두 줄은 호출부가 볼 수 있는 orderBy의 오버로드 시그니처다.
+  // 바깥에서는 컬럼 참조만 넘기거나, 컬럼 참조와 정렬 방향을 함께 넘기는 두 형태만 허용된다.
+  orderBy(column: ColumnRef<Row>): this;
+  orderBy(column: ColumnRef<Row>, direction: "asc" | "desc"): this;
+  // 구현 시그니처는 클래스 안에서 두 호출 형태를 처리하기 위한 몸체일 뿐이고,
+  // 호출부가 직접 고를 수 있는 시그니처로 노출되지 않는다.
+  // direction의 기본값을 "asc"로 두어 방향을 생략한 호출도 같은 구현에서 처리한다.
+  orderBy(column: ColumnRef<Row>, direction: "asc" | "desc" = "asc"): this {
+    // ColumnRef<Row>는 keyof Row에 브랜드를 인터섹션으로 덧붙인 타입이다.
+    // 따라서 브랜드가 붙은 값은 여전히 keyof Row 자리에 그대로 들어가며,
+    // 타입 안전을 흐리는 불필요한 단언 없이 정렬 컬럼으로 저장할 수 있다.
+    this.order = { column, direction };
+    return this;
+  }
+
+  // limit은 최대 반환 행 수를 빌더에 저장하고 this를 그대로 돌려준다.
+  // 따라서 where와 orderBy처럼 같은 호출 체인 안에서 뒤 메서드를 계속 이어 붙일 수 있다.
+  limit(n: number): this {
+    this.limitCount = n;
+    return this;
+  }
+
+  // column은 Row에 실제로 있는 컬럼 이름만 받아 ColumnRef로 감싼 타입을 돌려준다.
+  // 실행 시점에는 문자열 값을 그대로 반환하고, 브랜드 표시는 타입 레벨에만 남는다.
+  column<K extends keyof Row>(name: K): ColumnRef<Row, K> {
+    return name as ColumnRef<Row, K>;
   }
 
   // 저장된 테이블을 읽은 뒤 selectedCols에 기록된 컬럼만 새 객체로 옮겨 담는다.
@@ -83,7 +126,13 @@ class QueryBuilder<Row, Selected extends readonly (keyof Row)[] = []> {
     const filteredRows = table.filter((row) =>
       this.filters.every((filter) => matchesFilter(row[filter.column], filter.operator, filter.value)),
     );
-    return filteredRows.map((row) => {
+    // rows는 거르기, 정렬, 자르기 순서를 강제한다. 따라서 체인에서 limit을 orderBy보다 먼저
+    // 불러도 결과는 같다. 개수를 먼저 자른 뒤 정렬하면 "이름순 상위 2개"가 아니라
+    // "아무 2개를 이름순으로 놓은 것"이 되므로, 이 순서가 곧 조회의 뜻이다.
+    let resultRows = filteredRows;
+    if (this.order) resultRows = sortByColumn(resultRows, this.order);
+    if (this.limitCount !== undefined) resultRows = resultRows.slice(0, this.limitCount);
+    return resultRows.map((row) => {
       const picked = {} as Record<PropertyKey, unknown>;
       for (const col of cols) picked[col as PropertyKey] = row[col];
       return picked as Pick<Row, Selected[number]>;
@@ -170,6 +219,22 @@ function matchesFilter(left: unknown, operator: ComparisonOp, right: unknown): b
     case "<=":
       return (left as number) <= (right as number);
   }
+}
+
+function sortByColumn<Row>(rows: Row[], order: { column: keyof Row; direction: "asc" | "desc" }): Row[] {
+  // sort는 원본 배열을 제자리에서 바꾸므로, 사본을 만들지 않으면 filter가 돌려준 배열을 통해
+  // 호출자 쪽 데이터까지 흔들 수 있다. 그래서 펼침으로 사본을 만든 뒤 그 사본만 정렬한다.
+  return [...rows].sort((left, right) => {
+    const leftValue = left[order.column];
+    const rightValue = right[order.column];
+    if (leftValue === rightValue) return 0;
+    // 컬럼 값의 정적 타입은 Row[keyof Row]라 이 자리에서 구체 타입을 알 수 없다.
+    // 숫자와 문자열은 모두 < 연산자로 순서를 매길 수 있으므로 그 둘로 좁혀 비교한다.
+    // 문자열은 코드 단위 순서로 비교되므로 한글 이름도 일관된 순서를 얻는다.
+    const ascending = (leftValue as number | string) < (rightValue as number | string) ? -1 : 1;
+    // 내림차순은 오름차순 비교 결과의 부호만 뒤집어 같은 비교 함수를 재사용한다.
+    return order.direction === "asc" ? ascending : -ascending;
+  });
 }
 
 const pickedRows = qb.select("id", "name").rows();
@@ -304,5 +369,141 @@ const activeUsersAfterIdThree = from("users")
   .select("id", "name")
   .rows();
 console.log(activeUsersAfterIdThree);
+
+// codeStep 379 — 컬럼 참조 타입에 브랜드 적용하기
+
+declare const ColumnBrand: unique symbol;
+
+type ColumnRef<Row, K extends keyof Row = keyof Row> = K & { readonly [ColumnBrand]: Row };
+
+// declare const는 타입 선언일 뿐이라 자바스크립트 출력에서는 지워진다.
+// 그래서 erasableSyntaxOnly 설정과 node의 타입 스트리핑을 모두 통과하면서도
+// 타입 검사기에는 ColumnBrand라는 고유한 표시 이름을 남길 수 있다.
+// 인터섹션으로 붙은 [ColumnBrand] 프로퍼티는 런타임에 존재하지 않는다.
+// 값 차원에서는 그냥 문자열이고, 이 표시는 오직 타입 검사기만 본다.
+// 그래서 구조적으로 같은 문자열 "name"이어도 column을 거친 값과 맨 문자열은 다른 타입이 된다.
+// Row가 브랜드 안에 들어 있으므로 어느 테이블의 컬럼인지까지 타입에 기록된다.
+// 이 성질은 뒤 스텝에서 다른 테이블의 참조를 걸러 내는 근거가 된다.
+const nameRef = from("users").column("name");
+// Eq 단언을 두면 호버로 눈으로 확인하는 대신 컴파일러 검사로 ColumnRef의 정확한 결과를 고정할 수 있다.
+const nameRefMatch: Eq<typeof nameRef, ColumnRef<UsersSchema, "name">> = true;
+
+// 이 저장소는 태그 시점마다 npx tsc --noEmit이 0 오류여야 하므로, 일부러 막히는 예제는
+// 바로 아래 지시어로 소비해 오류가 그 한 줄에서 기대된다는 사실을 함께 기록한다.
+// 설명하는 산문에는 지시어 이름을 골뱅이와 함께 적지 않는다. 주석이 골뱅이 ts-expect-error로
+// 시작하면 뒤에 한국어가 붙어 있어도 타입 검사기가 그것을 또 하나의 지시어로 읽어,
+// 아무 오류도 덮지 않은 지시어라며 TS2578을 낸다.
+// @ts-expect-error - error TS2322: Type '"name"' is not assignable to type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+const bareStringRef: ColumnRef<UsersSchema> = "name";
+
+// codeStep 380 — orderBy 오버로드 시그니처 작성하기
+
+// column은 인스턴스 메서드이므로 컬럼 참조를 만들려면 먼저 빌더를 변수에 담아야 한다.
+// orderQuery.orderBy(orderQuery.column("name"))처럼 같은 빌더에서 만든 참조를 같은 빌더에 넘긴다.
+const orderQuery = from("users");
+const orderedByName = orderQuery.orderBy(orderQuery.column("name"));
+const orderedByNameDesc = orderQuery.orderBy(orderQuery.column("name"), "desc");
+
+// 두 호출이 모두 오류 없이 통과하므로 orderBy 오버로드가 방향 생략 호출과 방향 명시 호출을
+// 둘 다 받아들인다는 사실을 확인할 수 있다.
+// 반환 타입이 this라서 where처럼 Row와 Selected를 바꾸지 않고 같은 빌더 타입으로 체인이 이어진다.
+const orderedByNameMatch: Eq<typeof orderedByName, QueryBuilder<UsersSchema, []>> = true;
+const orderedByNameDescMatch: Eq<typeof orderedByNameDesc, QueryBuilder<UsersSchema, []>> = true;
+
+// rows는 아직 order 필드를 읽지 않는다. 실제 정렬 로직은 codeStep 381에서 추가하므로,
+// 이 스텝을 실행해도 콘솔 출력은 앞 스텝과 완전히 같다.
+
+// codeStep 381 — limit으로 체인 마무리하기
+
+// 활성 사용자를 이름 오름차순으로 정렬한 뒤 앞의 두 행만 남긴다. 이 화에서 확인하려는 payoff다.
+// 이 조회가 바로 생성자 전달이 필요한 형태다. orderBy와 limit으로 상태를 쌓은 뒤 select를 부르면
+// select가 새 인스턴스를 만들면서 order와 limitCount를 함께 넘겨야 그 상태가 살아남는다.
+// 넘기지 않으면 오류 하나 없이 정렬과 개수 제한이 사라져 거르기만 한 세 행이 그대로 나온다.
+const activeQuery = from("users");
+const topTwoActiveByName = activeQuery
+  .where("isActive", "=", true)
+  .orderBy(activeQuery.column("name"))
+  .limit(2)
+  .select("id", "name")
+  .rows();
+console.log(topTwoActiveByName);
+
+// 같은 조회에서 limit만 뺀 결과다. 활성 사용자는 세 명이므로 세 행이 모두 나온다.
+// 바로 위 출력과 나란히 보면 limit이 실제로 개수를 잘랐다는 것이 눈에 보인다.
+const allActiveByName = from("users");
+console.log(
+  allActiveByName
+    .where("isActive", "=", true)
+    .orderBy(allActiveByName.column("name"))
+    .select("id", "name")
+    .rows(),
+);
+
+// 방향을 명시한 오버로드로 id 내림차순 정렬을 확인한다.
+// data/users.json의 id는 파일 안에서 3, 1, 5, 2, 4 순서라 정렬이 실제로 순서를 바꾼다.
+const byIdDesc = from("users");
+console.log(byIdDesc.orderBy(byIdDesc.column("id"), "desc").select("id", "name").rows());
+
+// select를 먼저 부른 뒤 where, orderBy, limit을 이어도 첫 번째 조회와 같은 결과가 나온다.
+// 다만 이 순서는 생성자 전달과 무관하다. select가 이미 새 인스턴스를 돌려준 뒤에 그 인스턴스
+// 위로 조건과 정렬과 개수를 쌓기 때문에, 넘겨줄 이전 상태가 애초에 없다.
+// 그래서 첫 번째 조회와 이 조회를 함께 두면, 생성자 전달이 있어야만 두 순서가 같은 답을 낸다는
+// 사실이 드러난다. 전달을 빼고 실행하면 이 조회만 그대로이고 나머지 정렬 조회가 전부 어긋난다.
+const selectFirst = from("users");
+console.log(
+  selectFirst
+    .select("id", "name")
+    .where("isActive", "=", true)
+    .orderBy(selectFirst.column("name"))
+    .limit(2)
+    .rows(),
+);
+
+// limit을 orderBy보다 먼저 불러도 첫 번째 조회와 같은 결과가 나온다.
+// rows가 거르기, 정렬, 자르기 순서를 강제하므로 체인의 호출 순서가 뜻을 바꾸지 않는다.
+const limitBeforeOrder = from("users");
+console.log(
+  limitBeforeOrder
+    .where("isActive", "=", true)
+    .limit(2)
+    .orderBy(limitBeforeOrder.column("name"))
+    .select("id", "name")
+    .rows(),
+);
+
+// codeStep 382 — 잘못된 컬럼 참조로 에러 확인하기
+
+const guardQuery = from("users");
+const postsRefQuery = from("posts");
+
+// 이 저장소는 태그 시점마다 npx tsc --noEmit이 0 오류여야 하므로 일부러 틀린 호출은
+// 타입 검사 지시어로 소비한다. 그러면 이 줄들이 지금 기대한 오류라는 사실을 코드 안에 남기면서도
+// 타입 게이트는 깨지지 않는다. 나중에 이 호출이 오류가 아니게 되면 지시어 자체가 쓰이지 않았다는
+// 오류가 나므로, ColumnRef 규칙이 달라졌다는 신호도 바로 얻을 수 있다.
+// "name"은 users 테이블에 실제로 있는 컬럼 이름인데도 막힌다. 구조적으로는 같은 문자열이지만
+// column을 거치지 않아 브랜드 표시가 없으므로 ColumnRef 자리에 들어가지 못한다.
+// 이 화 도입에서 orderBy("nmae") 같은 오타가 아무 제지 없이 통과하던 문제는 여기서 닫힌다.
+// 오타든 정타든 column을 거치지 않은 문자열은 전부 막히기 때문이다.
+// @ts-expect-error - error TS2345: Argument of type '"name"' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy("name");
+
+// posts의 title은 UsersSchema에 아예 없는 이름이다. 따라서 이 호출은 당연히 막히지만,
+// 이 줄만으로는 브랜드 때문에 막혔는지 컬럼 이름 자체가 users에 없어서 막혔는지 구분되지 않는다.
+// 그래서 바로 다음 id 예제가 따로 필요하다.
+// @ts-expect-error - error TS2345: Argument of type 'ColumnRef<PostsSchema, "title">' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy(postsRefQuery.column("title"));
+
+// id는 UsersSchema와 PostsSchema 양쪽에 모두 있고 둘 다 number다. 이름으로도 값 타입으로도
+// 구분할 근거가 없는데도 이 호출은 막힌다. 막는 것은 오직 ColumnRef 브랜드 안에 기록된 Row뿐이다.
+// 따라서 이 줄은 브랜드가 컬럼 이름뿐 아니라 테이블 자체를 구분한다는 사실을 홀로 증명한다.
+// 위의 title 예제는 이 사실을 보여 주기에 부족하고, 양쪽에 같은 이름과 같은 값 타입으로 존재하는
+// id 예제가 있어야 출처가 다른 참조라는 이유만 남는다.
+// @ts-expect-error - error TS2345: Argument of type 'ColumnRef<PostsSchema, "id">' is not assignable to parameter of type 'ColumnRef<UsersSchema, keyof UsersSchema>'.
+guardQuery.orderBy(postsRefQuery.column("id"));
+
+// 같은 빌더에서 만든 참조는 그대로 받아들여진다. 따라서 위 호출들이 막힌 이유는 orderBy가
+// 까다로워서가 아니라, 넘긴 참조의 출처가 현재 빌더와 다르기 때문이라는 것이 분명해진다.
+const acceptedRef = guardQuery.orderBy(guardQuery.column("name"));
+const acceptedRefMatch: Eq<typeof acceptedRef, QueryBuilder<UsersSchema, []>> = true;
 
 export {};
