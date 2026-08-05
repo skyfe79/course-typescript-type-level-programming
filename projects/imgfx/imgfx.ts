@@ -34,4 +34,29 @@ function main(): void {
 
 main();
 
+// ── codeStep 422 — 잘못된 순서가 컴파일되지 않는 모습 미리 보기 ──────────────
+
+// 오늘의 목표를 미리 보여 주기 위한 임시 타입이다. 다음 화부터 진짜 ImageBuffer와
+// AnyStage로 교체하며, 지금은 문자열 태그 하나만으로 스테이지 사이의 포맷을 구별한다.
+type Tagged<Tag extends string> = { readonly tag: Tag };
+
+declare function previewInvert(x: Tagged<"RGBA8">): Tagged<"RGBA8">;
+declare function previewGrayscale(x: Tagged<"RGBA8">): Tagged<"Gray8">;
+declare function previewBrightness(x: Tagged<"RGBA8">): Tagged<"RGBA8">;
+
+// 첫 함수의 출력 B를 두 번째 함수의 입력 B로 함께 사용하므로, 두 포맷이 맞물려야만 한다.
+function chain2<A, B, C>(first: (input: A) => B, second: (input: B) => C): (input: A) => C {
+  return (input) => second(first(input));
+}
+
+// 타입 스트리핑은 타입만 지우므로, 런타임 값이 없는 declare 선언을 실제로 참조하면 그대로 터진다.
+// 그래서 아래 검사는 최상위에서 실행하지 않고, 호출되지 않는 함수 안에 두어 타입 검사에만 사용한다.
+function previewChainCheck(): void {
+  const validChain = chain2(previewInvert, previewBrightness); // RGBA8과 RGBA8이 맞물려 통과한다.
+
+  // @ts-expect-error — previewGrayscale의 출력은 Tagged<"Gray8">인데 previewBrightness는 Tagged<"RGBA8">를 요구한다.
+  const invalidChain = chain2(previewGrayscale, previewBrightness);
+  // 실제 진단은 두 번째 인자가 아니라, 뒤 함수의 입력에 맞지 않는 첫 번째 인자 previewGrayscale을 가리킨다.
+}
+
 export {};
