@@ -61,4 +61,88 @@ const rebuiltNotUnknown: Rebuilt = [] as unknown[];
 // 따라서 Rebuilt는 읽기 전용 튜플이 아니라 값을 다시 대입할 수 있는 가변 튜플이다.
 rebuiltProof[0] = 1;
 
+// codeStep 334 — MapT와 FilterT를 ReduceT 위에서 다시 만든다.
+
+// 이 파일 하나만 실행해도 모든 타입 정의가 완결되도록 앞 화의 1-인자 타입 함수 인코딩도 다시 쓴다.
+interface TypeFn {
+  readonly arg: unknown;
+  readonly out: unknown;
+}
+
+// F의 빈 arg 자리에 현재 원소 X를 끼워 넣은 뒤 out을 읽는다.
+type CallF<F extends TypeFn, X> = (F & { readonly arg: X })["out"];
+
+// Map의 한 걸음은 현재 원소에 F를 적용한 결과를 누산기 끝에 붙이는 일이다.
+// TypeFn2의 acc는 선언상 unknown이므로 AppendF와 마찬가지로 조건부 타입에서 먼저 좁힌다.
+interface MapCombine<F extends TypeFn> extends TypeFn2 {
+  readonly out: this["acc"] extends readonly unknown[]
+    ? [...this["acc"], CallF<F, this["item"]>]
+    : never;
+}
+
+type MapViaReduceT<
+  L extends readonly unknown[],
+  F extends TypeFn
+> = ReduceT<L, MapCombine<F>, []>;
+
+// Filter의 한 걸음은 술어 P가 true일 때만 현재 원소를 붙이고, 아니면 누산기를 그대로 넘기는 일이다.
+interface FilterCombine<P extends TypeFn> extends TypeFn2 {
+  readonly out: this["acc"] extends readonly unknown[]
+    ? CallF<P, this["item"]> extends true
+      ? [...this["acc"], this["item"]]
+      : this["acc"]
+    : never;
+}
+
+type FilterViaReduceT<
+  L extends readonly unknown[],
+  P extends TypeFn
+> = ReduceT<L, FilterCombine<P>, []>;
+
+// 앞 화와 같은 변환 규칙을 사용해야 재귀만 ReduceT로 바뀌었을 뿐 결과는 같다는 점을 대조할 수 있다.
+type Widen<T> = T extends string ? string
+  : T extends number ? number
+  : T extends boolean ? boolean
+  : T;
+
+interface WidenF extends TypeFn {
+  readonly out: Widen<this["arg"]>;
+}
+
+// 문자열만 고르는 술어도 앞 화와 같은 this["arg"] 인코딩으로 다시 선언한다.
+interface IsStringF extends TypeFn {
+  readonly out: this["arg"] extends string ? true : false;
+}
+
+type Check1 = MapViaReduceT<[1, "two", true], WidenF>;
+type Check2 = FilterViaReduceT<[1, "a", 2, "b"], IsStringF>;
+
+// MapViaReduceT의 결과가 넓어진 세 원시 타입의 튜플과 정확히 일치함을 양방향으로 확인한다.
+const check1Proof: Check1 = [42, "another string", false];
+const check1Exact: [number, string, boolean] = check1Proof;
+const check1RoundTrip: Check1 = check1Exact;
+// @ts-expect-error - 세 번째 원소는 boolean이어야 한다
+const check1NotWrong: Check1 = [42, "another string", "not boolean"];
+
+// FilterViaReduceT의 결과도 앞 화의 OnlyStrings와 같은 ["a", "b"]로 정확히 고정한다.
+const check2Proof: Check2 = ["a", "b"];
+const check2Exact: ["a", "b"] = check2Proof;
+const check2RoundTrip: Check2 = check2Exact;
+// @ts-expect-error - 문자열 두 개가 남으므로 빈 튜플은 Check2가 아니다
+const check2NotEmpty: Check2 = [];
+
+// 타입 레벨 ReduceT와 값 레벨 reduce는 같은 왼쪽 폴드 구조를 사용한다.
+// 첫 번째 데모는 모든 원소를 다시 붙이고, 두 번째 데모는 문자열일 때만 붙인다.
+const rebuiltAtRuntime = [1, "two", true].reduce<unknown[]>(
+  (acc, item) => [...acc, item],
+  []
+);
+const stringsAtRuntime = [1, "a", 2, "b"].reduce<string[]>(
+  (acc, item) => typeof item === "string" ? [...acc, item] : acc,
+  []
+);
+
+console.log("Rebuilt with reduce:", rebuiltAtRuntime);
+console.log("Only strings with reduce:", stringsAtRuntime);
+
 export {};
