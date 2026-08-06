@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  // strict 전체를 한 번에 켜지 않고, 먼저 TypeScript 2.0의 strictNullChecks만 켠다.
+  // strict: false로 하위 엄격성 플래그를 모두 내린 뒤 이 플래그 하나만 다시 활성화한다.
+  "compilerOptions": {
+    "strict": false,
+    "strictNullChecks": true
+  },
+  "include": ["legacy-service.ts"]
+}
