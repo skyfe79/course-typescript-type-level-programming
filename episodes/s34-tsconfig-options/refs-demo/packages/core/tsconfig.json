@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    // package.json의 type: module에 맞춰 Node.js ESM 규칙으로 컴파일합니다.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // 프로젝트 참조에 참여하려면 composite이 필요합니다. 이 옵션은 증분 빌드 정보와
+    // 다른 프로젝트가 읽을 선언 파일을 만들 수 있도록 프로젝트의 형태를 제한합니다.
+    "composite": true,
+    // composite이 이미 declaration을 켜 주지만, 참조되는 core가 공개 타입을 내보낸다는
+    // 사실을 분명히 하려고 명시합니다. false로 끄면 TS6304 오류로 거부됩니다.
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

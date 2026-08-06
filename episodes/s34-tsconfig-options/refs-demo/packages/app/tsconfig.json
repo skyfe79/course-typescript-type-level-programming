@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    // package.json의 type: module에 맞춰 Node.js ESM 규칙으로 컴파일합니다.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // app도 독립적으로 증분 빌드되는 composite 프로젝트입니다. declaration은 composite이
+    // 자동으로 켜므로 dist/index.js와 함께 dist/index.d.ts도 생성됩니다.
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  // 이 참조가 빌드 순서를 정하고 core의 공개 선언 변경 여부를 app의 증분 판단에 연결합니다.
+  "references": [{ "path": "../core" }]
+}
