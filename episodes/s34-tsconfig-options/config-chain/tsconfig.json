@@ -1,0 +1,12 @@
+{
+  // 공통 strict 설정과 기본 outDir를 물려받습니다.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // 애플리케이션 소스의 기준 폴더만 이 config에서 추가합니다.
+    // outDir는 적지 않았으므로 base의 "dist"가 최종 설정에 남습니다.
+    "rootDir": "src"
+  },
+  // 애플리케이션 config가 검사할 후보를 src 아래의 TypeScript 파일로 한정합니다.
+  // include는 배열을 이어 붙이지 않으므로, 자식이 다시 적으면 이 값 전체가 대체됩니다.
+  "include": ["src/**/*.ts"]
+}
