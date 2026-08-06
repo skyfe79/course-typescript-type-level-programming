@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    // 모든 파생 config가 같은 엄격한 타입 검사를 사용하도록 공통 설정에 둡니다.
+    // 자식 config가 strict를 다시 적지 않으면 이 true 값이 그대로 상속됩니다.
+    "strict": true,
+    // 애플리케이션 빌드의 기본 출력 폴더입니다.
+    // 자식 config가 outDir를 적지 않으면 이 값이 상속되고, 적으면 새 값으로 덮어써집니다.
+    "outDir": "dist"
+  }
+}
