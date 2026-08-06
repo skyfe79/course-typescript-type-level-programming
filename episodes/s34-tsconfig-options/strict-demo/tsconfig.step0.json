@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    // "use strict" 지시문을 화면에서 확인하려고 module을 commonjs로 둡니다.
+    // ES 모듈로 내보내면 언제나 엄격 모드라 지시문이 필요 없으므로 그 줄이 생기지 않습니다.
+    // TypeScript 7.0.2에서는 alwaysStrict의 기본값이 true이고 false로 되돌릴 수 없으므로
+    // step0부터 이미 "use strict"가 붙으며 마지막 단계에서 새로 생기지 않습니다.
+    // 끌 수 없다는 사실은 tsconfig.always-strict-off.json을 실행했을 때의 TS5108로 확인합니다.
+    "target": "es2022",
+    "module": "commonjs",
+    "types": ["node"],
+    "rootDir": "src",
+    // 이 폴더의 config들이 같은 출력 폴더를 사용하므로 다음 config로 넘어가기 전에 dist 폴더를 지우고 실행해야 결과가 섞이지 않습니다.
+    "outDir": "dist",
+    // strictNullChecks와 strictFunctionTypes는 앞 화들에서 이미 다룬 strict 계열 플래그이므로
+    // 이 실습은 둘을 켠 상태에서 출발합니다.
+    // strictNullChecks는 strictPropertyInitialization의 선행 조건이며, 끄면 TS5052가 납니다.
+    // 이 예제에는 null 관련 위반을 만들지 않습니다.
+    "strictNullChecks": true,
+    // strictFunctionTypes는 strictBindCallApply가 잘못된 apply 호출을 검사하는 데 필요한 선행 조건입니다.
+    // 이 예제에는 함수 대입 관련 위반을 만들지 않습니다.
+    "strictFunctionTypes": true,
+    // strict 묶음을 끈 낡은 프로젝트에서 출발하므로 이 단계에는 새 타입 오류가 없습니다.
+    "strict": false
+  },
+  // 이 실습 폴더의 소스만 입력에 포함합니다.
+  "include": ["src/**/*"]
+}
