@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    // rootDir를 고친 기본 config와 같은 조건을 유지한 채 emit 여부만 바꿉니다.
+    "target": "es2022",
+    "module": "nodenext",
+    "types": ["node"],
+    "rootDir": "src",
+    // 세 config가 같은 출력 폴더를 사용하므로 다음 config로 넘어가기 전에 dist 폴더를 지우고 실행해야 결과가 섞이지 않습니다.
+    // 실제 실행에서는 아래 noEmit 때문에 dist 폴더 자체가 만들어지지 않습니다.
+    "outDir": "dist",
+    // 타입 검사는 그대로 수행하지만 JavaScript를 비롯한 산출물은 전혀 내보내지 않습니다.
+    // 따라서 타입 오류가 있다면 오류만 출력되고, 성공해도 출력 폴더는 생기지 않습니다.
+    "noEmit": true
+  },
+  // emit 여부만 비교할 수 있도록 기본 config와 같은 소스를 검사합니다.
+  "include": ["src/**/*"]
+}

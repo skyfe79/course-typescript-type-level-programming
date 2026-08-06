@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    // 비교 대상 config와 컴파일 조건은 같고 rootDir만 명시적으로 고칩니다.
+    "target": "es2022",
+    "module": "nodenext",
+    "types": ["node"],
+    // 출력 경로를 계산할 때 src 폴더 자체는 제외하고 그 안쪽 구조부터 보존합니다.
+    // 그러므로 src/index.ts는 dist/src/index.js가 아니라 dist/index.js가 됩니다.
+    "rootDir": "src",
+    // 세 config가 같은 출력 폴더를 사용하므로 다음 config로 넘어가기 전에 dist 폴더를 지우고 실행해야 결과가 섞이지 않습니다.
+    "outDir": "dist"
+  },
+  // 이 화의 유일한 소스 파일만 입력에 포함합니다.
+  "include": ["src/**/*"]
+}

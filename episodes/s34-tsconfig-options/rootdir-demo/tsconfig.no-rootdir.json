@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    // 세 config가 같은 JavaScript 문법과 Node.js 모듈 형식을 사용하게 맞춥니다.
+    "target": "es2022",
+    "module": "nodenext",
+    "types": ["node"],
+    // 세 config가 같은 출력 폴더를 사용하므로 다음 config로 넘어가기 전에 dist 폴더를 지우고 실행해야 결과가 섞이지 않습니다.
+    "outDir": "dist"
+    // 이 config에는 rootDir를 일부러 적지 않습니다.
+    // TypeScript 6.0부터 기본 rootDir는 tsconfig.json이 놓인 이 프로젝트 루트입니다.
+    // 따라서 src/index.ts의 상대 경로인 src/index.js가 출력 폴더 안에도 그대로 남습니다.
+    // TypeScript 7.0.2는 파일을 내보내면서 동시에 다음 진단을 내고 종료 코드 2로 끝납니다.
+    // tsconfig.no-rootdir.json(8,5): error TS5011: The common source directory of 'tsconfig.no-rootdir.json' is './src'. The 'rootDir' setting must be explicitly set to this or another path to adjust your output's file layout.
+    //   Visit https://aka.ms/ts6 for migration information.
+    // noEmitOnError의 기본값은 false이므로 이 진단이 나와도 JavaScript는 dist/src/index.js에 출력됩니다.
+  },
+  // 다른 화의 파일이 섞이지 않도록 이 프로젝트의 src 폴더만 컴파일합니다.
+  "include": ["src/**/*"]
+}
