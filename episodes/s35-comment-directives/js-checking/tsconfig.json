@@ -1,0 +1,18 @@
+// 이 실습 전용 설정은 JavaScript 파일을 프로그램에 포함하되, 준비된 파일만 선택적으로 검사하는
+// 점진적 도입 전략을 보여 줍니다.
+// 검사: npx tsc --noEmit -p episodes/s35-comment-directives/js-checking
+// 실행: node episodes/s35-comment-directives/js-checking/legacy-utils.js
+// 검사하면 @ts-check가 있는 parse-order.js에서만 TS2345가 나와야 하고, 실행하면 1100이 출력되어야 합니다.
+// 타입 실수는 런타임 프로그램을 멈추지 않으며, 검사기만 그 실수를 알려 줍니다.
+{
+  "compilerOptions": {
+    // TypeScript가 가장 엄격한 타입 검사 규칙을 사용하게 합니다.
+    "strict": true,
+    // 이 폴더의 .js 파일을 TypeScript 프로그램 안으로 포함시킵니다.
+    "allowJs": true,
+    // 포함된 모든 .js 파일의 검사는 끄고, @ts-check가 있는 파일만 검사하게 합니다.
+    "checkJs": false,
+    // 검사 결과만 확인하고 JavaScript 출력 파일은 만들지 않습니다.
+    "noEmit": true
+  }
+}
