@@ -5,7 +5,5 @@
   "compilerOptions": {
     "strict": false
   },
-  "include": ["legacy-service.ts"],
-  // 루트가 이 파일을 제외하므로, 전용 검사에서는 상속한 exclude를 비운다.
-  "exclude": []
+  "include": ["legacy-service.ts"]
 }
