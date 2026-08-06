@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    // `type` 필드가 없는 가장 가까운 package.json에 맞춰 CommonJS 코드를 출력합니다.
+    // TypeScript 6.0부터 허용된 bundler 조합으로 상대 경로를 타입 검사 단계에서 해석합니다.
+    "module": "commonjs",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
+    // `bundler`는 출력 형식을 바꾸지 않습니다. 실제 산출물은 `module`에 따라 CommonJS가 됩니다.
+    // 수강생이 `node dist/main.js`로 그 결과를 직접 확인할 수 있게 emit합니다.
+    "outDir": "dist",
+    "strict": true
+  },
+  // 이 프로젝트의 두 소스만 한 번에 검사하고 컴파일합니다.
+  "files": ["math.ts", "main.ts"]
+}
