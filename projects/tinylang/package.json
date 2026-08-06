@@ -1,10 +1,17 @@
 {
   "name": "tinylang",
-  "private": true,
   "version": "1.0.0",
   "type": "module",
   "description": "토큰부터 코드 생성까지 타입으로 연결하는 작은 언어 (§31 프로젝트)입니다.",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "bin": {
+    "tinylang": "./dist/cli.js"
+  },
+  "files": ["dist"],
   "scripts": {
+    "build": "tsc -p . && chmod +x dist/cli.js",
+    "demo:e2e": "node observe-end-to-end.ts",
     "bench:types": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict --allowImportingTsExtensions --rewriteRelativeImportExtensions observe-type-level-check.ts"
   }
 }
