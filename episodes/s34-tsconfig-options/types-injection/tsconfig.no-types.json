@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    // 이 config는 `process` 타입을 찾지 못하도록 일부러 실패하는 실습의 "고치기 전" 상태입니다.
+    "strict": true,
+    "rootDir": ".",
+    // 검사만 수행하고 JavaScript 산출물은 남기지 않습니다.
+    "noEmit": true
+    // `types`를 적지 않으면 TypeScript 7.0의 빈 배열 기본값이 적용됩니다.
+    // 따라서 설치된 `@types/node`가 있어도 그 전역 선언은 자동으로 주입되지 않습니다.
+  },
+  // 실패 원인을 이 실습 파일 하나로 한정합니다.
+  "files": ["args.ts"]
+}

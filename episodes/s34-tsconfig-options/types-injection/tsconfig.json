@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    // 고치기 전 config와 같은 엄격한 검사 조건을 유지합니다.
+    "strict": true,
+    "rootDir": ".",
+    // 검사만 수행하고 JavaScript 산출물은 남기지 않습니다.
+    "noEmit": true,
+    // 이 한 줄이 `@types/node`의 전역 선언을 주입해 `process` 이름을 찾게 합니다.
+    // 이는 내장/브라우저 전역을 고르는 `lib`과는 다른 서드파티 타입 주입 층입니다.
+    "types": ["node"]
+  },
+  // 성공 여부를 고치기 전 config와 같은 파일로 비교합니다.
+  "files": ["args.ts"]
+}
