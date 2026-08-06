@@ -16,12 +16,19 @@ export type UnaryOperator = "-" | "!";
 // 덕분에 while 같은 문을 이항식의 자식으로 넣는 잘못도 실행 전에 거절된다.
 // brief 초안의 numberLiteral·binaryExpr·callExpr 대신 literal·binary·call을 쓰는 것도
 // 이후 모든 단계가 이 판별자 이름으로 분기하기 때문이다.
-export type Expr =
-  | { readonly kind: "literal"; readonly value: number | string | boolean }
-  | { readonly kind: "identifier"; readonly name: string }
-  | { readonly kind: "binary"; readonly operator: BinaryOperator; readonly left: Expr; readonly right: Expr }
-  | { readonly kind: "unary"; readonly operator: UnaryOperator; readonly operand: Expr }
-  | { readonly kind: "call"; readonly callee: string; readonly args: readonly Expr[] };
+// 타입 별칭인 유니온은 다른 파일의 선언과 합쳐지지 않는다. 갈래들을 선언 병합이 가능한
+// 인터페이스에 등록하고 그 값들에서 Expr를 유도하면, 이 핵심 파일은 오늘 한 번만 고친 뒤
+// 다른 파일이 declare module로 새 식을 등록할 수 있다. 필드 모양은 이전 유니온과 같으므로
+// 기존 파서·검사기·코드 생성기가 받는 타입의 의미는 바뀌지 않는다.
+export interface ExprRegistry {
+  literal: { readonly kind: "literal"; readonly value: number | string | boolean };
+  identifier: { readonly kind: "identifier"; readonly name: string };
+  binary: { readonly kind: "binary"; readonly operator: BinaryOperator; readonly left: Expr; readonly right: Expr };
+  unary: { readonly kind: "unary"; readonly operator: UnaryOperator; readonly operand: Expr };
+  call: { readonly kind: "call"; readonly callee: string; readonly args: readonly Expr[] };
+}
+
+export type Expr = ExprRegistry[keyof ExprRegistry];
 
 // ── 블록과 문 (Statement) ──────────────────────────────────
 export type Block = {
