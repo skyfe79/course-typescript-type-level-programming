@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    // 주변에 설치된 Node 타입을 자동으로 포함하지 않아 process의 TS2591을 재현합니다.
+    "types": [],
+    "noEmit": true
+  },
+  "files": ["directive-free.ts"]
+}
