@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    // package.json의 type: module에 맞춰 Node.js ESM 규칙으로 컴파일합니다.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // 프로젝트 참조에 참여하려면 composite이 필요합니다. composite이 declaration도 자동으로
+    // 켜므로 따로 명시하지 않아도 dist/index.d.ts가 만들어집니다.
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
