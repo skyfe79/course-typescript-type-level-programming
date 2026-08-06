@@ -1,0 +1,8 @@
+{
+  "name": "ep-238-paths-demo",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#utils/*": "./src/utils/*.ts"
+  }
+}
