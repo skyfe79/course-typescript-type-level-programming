@@ -1,0 +1,10 @@
+import type { Block, Expr, FuncDecl, Program, Statement } from "./ast.ts";
+export declare const BUILTIN_NAMES: readonly ["print", "input", "toNumber", "random", "toString"];
+export type BuiltinName = (typeof BUILTIN_NAMES)[number];
+export declare function isBuiltin(name: string): boolean;
+export declare function mangle(name: string): string;
+export declare function emitExpr(expr: Expr): string;
+export declare function emitStatement(stmt: Statement, level?: number): string;
+export declare function emitBlock(block: Block, level?: number): string;
+export declare function emitFunction(func: FuncDecl, level?: number): string;
+export declare function emitProgram(program: Program): string;

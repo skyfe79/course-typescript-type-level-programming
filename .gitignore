@@ -121,6 +121,11 @@ dist
 # main/types/bin 대상이 비어 있으므로 예외를 둡니다.
 !projects/imgfx/dist/
 !projects/imgfx/dist/**
+# 강의 실습용 배포 결과물 (§31 tinylang — ep_222)
+# ep_222 태그를 체크아웃한 상태에서 곧바로 설치된 tinylang 명령어가 돌아야 하므로,
+# package.json의 main/types/bin이 가리키는 dist와 그 내용을 강의 자료에 포함합니다.
+!projects/tinylang/dist/
+!projects/tinylang/dist/**
 .output
 
 # Gatsby files

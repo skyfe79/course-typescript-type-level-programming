@@ -1,5 +1,19 @@
 {
-  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정한다.
-  // 아직 배포하지 않는 프로젝트이므로 이 설정을 상속하는 것만으로 충분하다.
-  "extends": "../../tsconfig.json"
+  // 루트 tsconfig.json이 strict, Node 타입, erasableSyntaxOnly, noEmit을 이미 정합니다.
+  // extends는 compilerOptions를 상속하므로 여기서 공통 검사 옵션을 되풀이하지 않습니다.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // 루트의 noEmit은 저장소 전체를 출력 없이 검사하기 위한 설정입니다.
+    // tinylang은 설치할 dist가 필요하므로 패키지 빌드에서만 출력을 다시 켭니다.
+    "noEmit": false,
+    // cli.ts가 내보내는 명령행 계약을 패키지 사용자도 읽도록 .d.ts를 함께 만듭니다.
+    "declaration": true,
+    // 컴파일할 패키지 소스의 기준점을 src로 고정해 dist 바로 아래에 결과를 모읍니다.
+    "rootDir": "src",
+    // package.json의 main, types, bin이 가리키는 설치용 결과를 이 폴더에 냅니다.
+    "outDir": "dist"
+  },
+  // observe-*.ts 관찰 스크립트는 src 밖에서 소스 모듈을 직접 불러오는 강의 자료입니다.
+  // 배포 빌드에는 관찰 스크립트를 섞지 않고 실제 패키지 소스인 src만 포함합니다.
+  "include": ["src"]
 }
