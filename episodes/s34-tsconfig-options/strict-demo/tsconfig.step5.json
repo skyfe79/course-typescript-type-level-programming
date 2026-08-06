@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    // "use strict" 지시문을 화면에서 확인하려고 module을 commonjs로 둡니다.
+    // ES 모듈로 내보내면 언제나 엄격 모드라 지시문이 필요 없으므로 그 줄이 생기지 않습니다.
+    // TypeScript 7.0.2에서는 alwaysStrict의 기본값이 true이고 false로 되돌릴 수 없으므로
+    // step0부터 이미 "use strict"가 붙으며 마지막 단계에서 새로 생기지 않습니다.
+    // 끌 수 없다는 사실은 tsconfig.always-strict-off.json을 실행했을 때의 TS5108로 확인합니다.
+    "target": "es2022",
+    "module": "commonjs",
+    "types": ["node"],
+    "rootDir": "src",
+    // 이 폴더의 config들이 같은 출력 폴더를 사용하므로 다음 config로 넘어가기 전에 dist 폴더를 지우고 실행해야 결과가 섞이지 않습니다.
+    "outDir": "dist",
+    // strictPropertyInitialization을 켜려면 필요한 선행 조건입니다.
+    // 모든 단계에서 똑같이 켜 두되, 이 예제에는 null 관련 위반을 만들지 않습니다.
+    "strictNullChecks": true,
+    // TypeScript 7에서 strictBindCallApply가 함수 매개변수까지 대조하는 데 필요한 선행 조건입니다.
+    // 모든 단계에서 똑같이 켜 두되, 이 예제에는 함수 대입 관련 위반을 만들지 않습니다.
+    "strictFunctionTypes": true,
+    "strict": false,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictPropertyInitialization": true,
+    // strictBindCallApply는 함수 시그니처와 맞지 않는 apply의 인자 배열을 잡습니다.
+    "strictBindCallApply": true,
+    // strictBuiltinIteratorReturn은 내장 반복자의 TReturn을 any가 아니라 undefined로 봅니다.
+    // 그래서 done이 참일 때의 value를 다른 타입에 대입하던 낡은 코드가 여기서 걸립니다.
+    "strictBuiltinIteratorReturn": true
+  },
+  // 이 실습 폴더의 소스만 입력에 포함합니다.
+  "include": ["src/**/*"]
+}
