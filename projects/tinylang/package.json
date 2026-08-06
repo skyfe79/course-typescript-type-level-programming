@@ -11,6 +11,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p . && chmod +x dist/cli.js",
+    "demo:e2e": "node observe-end-to-end.ts",
     "bench:types": "tsc --noEmit --extendedDiagnostics --ignoreConfig --strict --allowImportingTsExtensions --rewriteRelativeImportExtensions observe-type-level-check.ts"
   }
 }
