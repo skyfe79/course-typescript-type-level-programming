@@ -22,6 +22,9 @@
     "episodes/s29-diagnostics/type-tests-regression.ts",
     // strict 계열 플래그를 단계별로 켜는 실패 실습이므로, 옆의 전용 config들이 대신 검사합니다.
     "episodes/s34-tsconfig-options/strict-demo/src/legacy.ts",
+    // 루트 설정에는 이 실습 전용 paths가 없어 @utils 두 import에서 TS2307이 나므로 제외합니다.
+    // 대신 paths-demo/tsconfig.json이 nodenext로 두 별칭을 포함한 모든 소스를 따로 검사합니다.
+    "episodes/s34-tsconfig-options/paths-demo",
     // 6.0 컴파일러가 자기 tsconfig로 따로 검사하는 별도 설치 뿌리이므로, 7.0 게이트에서
     // 검사하면 이 폴더에만 설치된 @typescript/typescript6 import를 풀지 못해 실패합니다.
     "episodes/s33-release-history/legacy-toolchain"
