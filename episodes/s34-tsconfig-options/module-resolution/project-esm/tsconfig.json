@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    // 가장 가까운 package.json의 `type: "module"`을 따라 Node.js ESM으로 출력합니다.
+    // Node.js의 ESM 규칙을 타입 검사에도 똑같이 적용하려고 두 옵션을 nodenext로 맞춥니다.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": ".",
+    // 수강생이 `node dist/main.js`로 실제 ESM 출력 결과를 실행할 수 있게 emit합니다.
+    "outDir": "dist",
+    "strict": true
+  },
+  // 이 프로젝트의 두 소스만 한 번에 검사하고 컴파일합니다.
+  "files": ["math.ts", "main.ts"]
+}
