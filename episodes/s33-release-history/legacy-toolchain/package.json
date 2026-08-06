@@ -1,0 +1,13 @@
+{
+  "name": "typescript-6-legacy-toolchain",
+  "description": "루트에 설치하면 tsc 이름을 빼앗으므로 TypeScript 6.0 도구를 별도 설치 뿌리에 격리합니다.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc6 --noEmit -p ../tsconfig.dual-check.json",
+    "api": "node legacy-api-tool.ts"
+  },
+  "devDependencies": {
+    "@typescript/typescript6": "^6.0.2"
+  }
+}
