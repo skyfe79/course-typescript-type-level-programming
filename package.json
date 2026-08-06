@@ -6,6 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:types": "tsc --noEmit -p tsconfig.test.json",
+    "check:current": "tsc --noEmit -p episodes/s33-release-history/tsconfig.dual-check.json",
+    "check:legacy": "npm --prefix episodes/s33-release-history/legacy-toolchain run check",
+    "legacy:install": "npm --prefix episodes/s33-release-history/legacy-toolchain install",
     "typecheck:default": "tsc -p episodes/s29-diagnostics --extendedDiagnostics",
     "typecheck:parallel": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 8",
     "typecheck:single": "tsc -p episodes/s29-diagnostics --extendedDiagnostics --checkers 1",
