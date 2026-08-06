@@ -31,6 +31,8 @@
     "episodes/s34-tsconfig-options/refs-demo",
     // 주석 지시어를 일부러 빼 실패시키는 파일이며, 옆의 tsconfig.directive-free.json이 대신 검사합니다.
     "episodes/s35-comment-directives/directive-free.ts",
+    // 쓸모없어진 @ts-expect-error가 TS2578을 내는 의도적 실패 실습이므로 루트 검사에서 제외합니다.
+    "episodes/s35-comment-directives/suppressed-with-expect-error.ts",
     // 6.0 컴파일러가 자기 tsconfig로 따로 검사하는 별도 설치 뿌리이므로, 7.0 게이트에서
     // 검사하면 이 폴더에만 설치된 @typescript/typescript6 import를 풀지 못해 실패합니다.
     "episodes/s33-release-history/legacy-toolchain"
