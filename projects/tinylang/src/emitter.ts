@@ -1,6 +1,9 @@
 // AST를 따라가며 식·문·함수 선언을 사람이 읽을 수 있는 자바스크립트 텍스트로 바꾼다.
 
 import type { Block, Expr, FuncDecl, IfStatement, Program, Statement } from "./ast.ts";
+// ternary case와 그 타입 등록은 한 쌍이다. 타입 전용 import로 격리 컴파일에서도
+// 보강 선언을 읽게 하되, 실행되는 자바스크립트 의존은 추가하지 않는다.
+import type {} from "./augment-ternary.ts";
 
 // 런타임 프렐류드는 생성된 코드의 바깥에서 이 이름들로 제공된다. as const를
 // 붙여 각 원소를 넓은 string이 아니라 정확한 문자열 리터럴 타입으로 보존한다.
@@ -47,6 +50,11 @@ export function emitExpr(expr: Expr): string {
       const operand = emitExpr(expr.operand);
       return `(${expr.operator}${operand})`;
     }
+
+    case "ternary":
+      // 렉서와 파서는 아직 `? :`를 만들지 않는다. 모듈 보강으로 등록해 손으로 조립한
+      // 노드만 처리하며, 세 자식을 재귀 변환하고 괄호로 AST의 결합 순서를 보존한다.
+      return `(${emitExpr(expr.condition)} ? ${emitExpr(expr.whenTrue)} : ${emitExpr(expr.whenFalse)})`;
 
     case "call": {
       // 프렐류드 함수는 런타임이 제공하는 이름 그대로 부르고, 사용자 정의 함수만
