@@ -1,0 +1,14 @@
+{
+  // 첫 단계의 TS5108 두 건과 TS5102 세 건을 보고 제거된 값과 옵션만 순진하게 정리한 상태다.
+  // 진단은 다섯 건에서 한 건으로 줄지만, module과 moduleResolution 사이의 짝 제약이 새로 드러난다.
+  "compilerOptions": {
+    // esnext 자체는 유효하지만 nodenext 해석 방식과 함께 사용할 수 있는 module 값은 아니다.
+    "module": "esnext",
+    // NodeNext 모듈 해석을 선택하면 module도 반드시 NodeNext여야 한다.
+    // error TS5110: Option 'module' must be set to 'NodeNext' when option 'moduleResolution' is set to 'NodeNext'.
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "types": ["node"]
+  },
+  "include": ["upgrade-iteration.ts"]
+}
