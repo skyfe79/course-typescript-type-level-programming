@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    // 두 버전 모두 이해하며 Node ESM 패키지의 모듈 규칙을 따르는 값이다.
+    "module": "nodenext",
+    // module과 같은 NodeNext 짝으로 맞춰 TS5110을 피한다.
+    "moduleResolution": "nodenext",
+    // 두 컴파일러에서 같은 엄격한 타입 검사를 적용한다.
+    "strict": true,
+    // Node가 제공하는 전역 타입만 명시적으로 불러온다.
+    "types": ["node"],
+    // 이 실습은 결과 파일을 만들지 않고 타입 검사 결과만 비교한다.
+    "noEmit": true,
+    // Node가 타입 제거만으로 직접 실행할 수 없는 TypeScript 문법을 막는다.
+    "erasableSyntaxOnly": true
+  },
+  // 두 바이너리가 같은 소스 파일 하나만 검사하도록 범위를 고정한다.
+  "include": ["dual-version-check.ts"]
+}
