@@ -1,0 +1,15 @@
+{
+  // 제거된 값과 옵션을 정리한 뒤 module과 moduleResolution도 같은 NodeNext 짝으로 맞춘 최종본이다.
+  // 두 옵션의 짝 제약을 만족하므로 TS5110 없이 통과한다.
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "types": ["node"],
+    // 이 설정은 업그레이드 검사용이므로 결과 파일을 만들지 않고 타입만 검사한다.
+    "noEmit": true,
+    // Node가 직접 실행할 수 있도록 타입 제거만으로 처리할 수 없는 TypeScript 문법을 막는다.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["upgrade-iteration.ts"]
+}
