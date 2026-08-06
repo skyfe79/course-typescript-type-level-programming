@@ -1,11 +1,16 @@
+#!/usr/bin/env node
+// package.json의 bin은 실행할 파일만 정합니다. 셸이 그 파일을 Node로 실행하게 하는 정보는
+// 첫 줄의 셔뱅이 맡으며, tsc는 이 줄을 빌드한 dist/cli.js에도 그대로 옮깁니다.
 // tinylang 명령행 인자를 판별 유니온으로 바꾸고, 파일과 프로세스를 다루는 효과를
 // 이 경계 한곳에 모은다. 컴파일러 본체는 문자열과 값만 주고받는 순수 함수로 남는다.
 
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -160,12 +165,17 @@ function runBuild(path: string, outPath: string | null): BuildOutcome {
     mkdirSync(targetDirectory, { recursive: true });
     writeFileSync(target, emitProgram(loaded.program), "utf8");
 
-    // 생성 코드의 ./prelude.js는 다리 파일이고, 그 다리는 다시 실제 prelude.ts를
-    // 가리킨다. Node가 두 상대 경로를 모두 찾도록 출력 파일 옆에 함께 복사한다.
+    // 소스에서 실행할 때 prelude.js는 prelude.ts를 가리키는 다리이므로 둘 다 복사합니다.
+    // 빌드된 dist/prelude.js는 다리가 아니라 구현 그 자체라서, 생성 코드가 가져오는
+    // ./prelude.js 하나만으로 충분합니다. 따라서 .js는 항상 복사하고, 컴파일 과정에서
+    // 생기지 않는 .ts는 소스 옆에 실제로 있을 때만 복사합니다.
     if (resolve(preludeJavaScriptSource) !== resolve(preludeJavaScriptTarget)) {
       copyFileSync(preludeJavaScriptSource, preludeJavaScriptTarget);
     }
-    if (resolve(preludeTypeScriptSource) !== resolve(preludeTypeScriptTarget)) {
+    if (
+      existsSync(preludeTypeScriptSource) &&
+      resolve(preludeTypeScriptSource) !== resolve(preludeTypeScriptTarget)
+    ) {
       copyFileSync(preludeTypeScriptSource, preludeTypeScriptTarget);
     }
   } catch (error) {
@@ -233,6 +243,26 @@ function main(): void {
 
 // 이 파일은 CLI 진입점이면서, 관찰 스크립트가 parseArgs를 가져다 쓰는 모듈이기도 하다.
 // node가 직접 실행한 파일일 때만 main을 부르면 import만 한 쪽에서는 인자를 읽지 않는다.
-if (process.argv[1] === import.meta.filename) {
+//
+// 두 경로를 문자열 그대로 비교하면 설치된 명령어로 실행할 때 이 판정이 어긋난다. npm이 bin으로
+// 만드는 것은 node_modules/.bin/tinylang이라는 심볼릭 링크이고, 셸이 넘기는 process.argv[1]은
+// 그 링크 경로 그대로다. 반면 import.meta.filename은 Node가 링크를 따라간 실제 파일 경로다.
+// 그래서 링크를 푼 경로끼리 비교해야 소스 실행과 설치된 명령어 실행이 같은 판정을 받는다.
+function isDirectRun(): boolean {
+  const invokedPath = process.argv[1];
+  if (invokedPath === undefined) {
+    // node -e처럼 실행한 파일이 없는 경우다. 진입점이 아니므로 인자를 읽지 않는다.
+    return false;
+  }
+
+  try {
+    return realpathSync(invokedPath) === import.meta.filename;
+  } catch {
+    // 이미 지워진 경로처럼 링크를 풀 수 없는 입력을 진입점으로 오해하지 않는다.
+    return false;
+  }
+}
+
+if (isDirectRun()) {
   main();
 }
