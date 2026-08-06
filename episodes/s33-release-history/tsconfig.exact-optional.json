@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  // TypeScript 4.4의 exactOptionalPropertyTypes는 strict에 포함되지 않는 별도 opt-in이다.
+  // 이 플래그만 추가해 옵셔널 프로퍼티와 명시적인 undefined 대입의 차이를 확인한다.
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": true
+  },
+  "include": ["route-table.ts"]
+}
