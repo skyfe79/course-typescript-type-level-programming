@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  // 최신 target과 lib는 그대로 두고 strict만 꺼서 TypeScript 1.x 시절의 느슨한
+  // 타입 검사 기본값을 재현한다. 이 예제의 초점은 문법 세대가 아니라 검사 엄격도다.
+  "compilerOptions": {
+    "strict": false
+  },
+  "include": ["legacy-service.ts"],
+  // 루트가 이 파일을 제외하므로, 전용 검사에서는 상속한 exclude를 비운다.
+  "exclude": []
+}
