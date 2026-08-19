@@ -48,6 +48,6 @@ console.log("MapT의 F 자리는 여전히 포장된 함수 타입만 받습니�
 // @ts-expect-error - Type 'F' is not generic.
 type Apply2<F, X> = F<X>;
 
-console.log("타입 매개변수 F는 그 자체로는 절대 다시 제네릭이 될 수 없습니다.");
+console.log("타입 매개변수 F는 타입 생성자 매개변수가 아니어서 F<X>처럼 적용할 수 없습니다.");
 
 export {};
