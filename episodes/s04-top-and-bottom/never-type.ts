@@ -7,9 +7,10 @@ function echo(value: WithNever): string {
 
 console.log(echo("hello"));
 
-// 지역 변수의 빈 배열은 any[]로 시작해, 뒤따르는 push를 보고 원소 타입이 채워진다.
+// 지역 변수의 빈 배열은 선언 자리에서는 any[]로 보이고, push 뒤의 참조에서는 number[]로 읽힌다.
 const untyped = [];
 untyped.push(1);
+console.log(untyped);
 
 // 객체 프로퍼티의 빈 배열은 never[]로 굳어 어떤 값도 넣을 수 없다.
 const collected = { items: [] };
