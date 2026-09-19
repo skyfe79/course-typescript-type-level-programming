@@ -72,9 +72,10 @@ npx tsc --extendedDiagnostics --ignoreConfig --strict episodes/s12-functions-var
 
 두 파일은 길이가 달라서(stripped 쪽에 PropConsumer 대조가 더 있다) 이 수치 차이를 어노테이션
 때문이라고 말할 수 없다. 그래서 본문을 똑같이 맞추고 어노테이션만 다르게 한 대조군을 따로
-만들어 다시 쟀다. 대입 300개 * 8단계 중첩까지 키운 결과:
-  annotated  Types 36261 / Instantiations 34245 / Check time 0.132s, 0.123s, 0.127s
-  stripped   Types 36261 / Instantiations 34245 / Check time 0.124s, 0.123s, 0.123s
+만들어 다시 쟀다(variance-effect-control-annotated.ts · variance-effect-control-stripped.ts).
+대입 300개 * 8단계 중첩까지 키운 결과:
+  annotated  Types 36285 / Instantiations 34243 / Check time 0.175s, 0.196s, 0.190s
+  stripped   Types 36285 / Instantiations 34243 / Check time 0.174s, 0.202s, 0.427s
 
 판정: Types와 Instantiations가 글자 그대로 같고 Check time은 실행 간 노이즈 안에 있다.
 이 규모에서 어노테이션의 속도 효과는 관측되지 않는다.
