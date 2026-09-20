@@ -50,4 +50,16 @@ const legacy: ParsedOrder = { orderId: "o-41", quantity: 1, unitPriceCents: 500 
 console.log(csvHeader());
 console.log(csvRow(legacy));
 
+// codeStep 214 — 새 필드를 채운 주문 내보내기
+
+const shipped: ParsedOrder = {
+  orderId: "o-42",
+  quantity: 2,
+  unitPriceCents: 900,
+  giftMessage: "생일 축하해요",
+};
+
+console.log(formatReceiptLine(shipped));
+console.log(csvRow(shipped));
+
 export {};
