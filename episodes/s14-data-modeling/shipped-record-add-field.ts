@@ -9,6 +9,9 @@ type ParsedOrder = {
   orderId: string;
   quantity: number;
   unitPriceCents: number;
+  // codeStep 213 — 선택적 필드 추가와 내보내기 열 결정
+  // 값이 선택적이어도 keyof에는 giftMessage 키가 포함된다.
+  giftMessage?: string;
 };
 
 function calculateTotalCents(order: ParsedOrder): number {
@@ -27,6 +30,9 @@ const columnLabels: Record<keyof ParsedOrder, string> = {
   orderId: "주문 번호",
   quantity: "수량",
   unitPriceCents: "단가",
+  // 이 줄이 없으면 columnLabels에서 giftMessage가 빠졌다는 TS2741 오류가 정확히 하나 발생한다.
+  // 세 함수는 그대로 통과하며, 이 레이블이 컴파일러가 요구한 새 열에 대한 결정이다.
+  giftMessage: "선물 메시지",
 };
 
 const columns = Object.keys(columnLabels) as (keyof ParsedOrder)[];
