@@ -81,7 +81,7 @@ const interpreters: Interpreter[] = [runCommand, runCommandDryRun];
 // codeStep 231 — 코어 코드 변경 없이 드라이런 확인하기
 
 const isDryRun = process.argv.includes("--dry-run");
-const interpreter: Interpreter = isDryRun ? runCommandDryRun : runCommand;
+const interpreter: Interpreter = interpreters[isDryRun ? 1 : 0];
 
 const orders: OrderStatus[] = [
   { kind: "pickup", storeLocation: "강남점" },
