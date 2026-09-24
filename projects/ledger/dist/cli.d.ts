@@ -8,6 +8,9 @@ type Command = {
 } | {
     kind: "budget";
     args: string[];
+} | {
+    kind: "replay";
+    args: string[];
 };
 declare function parseCommand(argv: string[]): Command;
 declare const JOURNAL_PATH = "journal.json";

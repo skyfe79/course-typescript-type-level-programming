@@ -30,13 +30,13 @@ import { decide, parseJournal, parseTransaction } from "./ledger.js";
 import { runCommandDryRun } from "./dry-run-interpreter.js";
 import { runCommand } from "./interpreter.js";
 import { formatReport } from "./report.js";
-import { recordCommand, saveRunLog } from "./replay-interpreter.js";
+import { loadRunLog, makeReplayInterpreter, recordCommand, saveRunLog } from "./replay-interpreter.js";
 function parseCommand(argv) {
     const [kind, ...args] = argv;
     /*
      * 보장 2가 아직 들어오지 않은 거친 스텁입니다.
      *
-     * 아래 단언은 "argv[0]이 add, report, budget 중 하나다"라고
+     * 아래 단언은 "argv[0]이 add, report, budget, replay 중 하나다"라고
      * 타입 검사기에게만 말합니다. 실제 문자열을 확인하지는 않습니다.
      * 그래서 nonsense 같은 값도 Command로 만들어져 main까지 넘어갑니다.
      * 다음 단계에서는 이 자리를 진짜 파싱으로 바꿉니다.
@@ -144,6 +144,25 @@ function runAddRecording(args, argv) {
     saveRunLog(RUN_LOG_PATH, { argv, entries });
 }
 /*
+ * replay 명령은 run-log.json에 남은 argv를 다시 파싱해 같은 runAdd를 한 번 더 돕니다.
+ * 이번에는 리플레이 인터프리터를 넘기므로 저널과 시계는 기록에서 나오고, 쓰기와 출력은
+ * 실행하지 않고 [리플레이] 표시와 함께 무엇을 하려 했는지만 보여 줍니다. 그래서 몇 번을
+ * 재생해도 journal.json과 run-log.json은 바뀌지 않습니다.
+ *
+ * 지금 기록하는 실행은 add뿐이므로, 로그의 명령이 add가 아니면 재생하지 않고 멈춥니다.
+ */
+function runReplay() {
+    const log = loadRunLog(RUN_LOG_PATH);
+    const recorded = parseCommand([...log.argv]);
+    if (recorded.kind !== "add") {
+        console.log(`기록된 실행이 add가 아닙니다: ${recorded.kind}`);
+        process.exitCode = 1;
+        return;
+    }
+    const { rest } = takeFlags(recorded.args);
+    runAdd(rest, makeReplayInterpreter(log));
+}
+/*
  * parseCommand는 아직 플래그를 모르는 단순한 표면 파서입니다. 그래서 add 인자에
  * 섞여 들어온 --dry-run 같은 플래그는 add 실행 직전에 한 번 걸러 냅니다.
  * 지금은 알 수 없는 --플래그도 조용히 빼고, 실제 거래 인자만 rest에 남깁니다.
@@ -192,12 +211,15 @@ function main(command, argv) {
             console.log("budget 명령은 아직 구현되지 않았습니다.");
             console.log(`인자: ${command.args.join(", ")}`);
             break;
+        case "replay":
+            runReplay();
+            break;
         default: {
             /*
-             * 위 세 case가 Command 유니온을 모두 소진하면, 이 위치의 command는
+             * 위 네 case가 Command 유니온을 모두 소진하면, 이 위치의 command는
              * never로 좁혀집니다. 그래서 지금은 아래 대입이 컴파일됩니다.
              *
-             * 나중에 Command에 네 번째 kind를 더하고 switch 분기를 빠뜨리면,
+             * 나중에 Command에 다섯 번째 kind를 더하고 switch 분기를 빠뜨리면,
              * command가 더 이상 never가 아니므로 이 줄이 곧바로 컴파일 오류가 됩니다.
              * 빠진 분기를 타입 검사 단계에서 확인하게 해 주는 완전성 검사입니다.
              */
