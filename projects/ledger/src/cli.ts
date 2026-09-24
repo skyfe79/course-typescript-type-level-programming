@@ -31,7 +31,7 @@ import type { Command as CoreCommand, RawTransaction } from "./ledger.ts";
 import { runCommandDryRun } from "./dry-run-interpreter.ts";
 import { runCommand } from "./interpreter.ts";
 import type { Interpreter } from "./interpreter.ts";
-import { recordCommand, saveRunLog } from "./replay-interpreter.ts";
+import { loadRunLog, makeReplayInterpreter, recordCommand, saveRunLog } from "./replay-interpreter.ts";
 import type { LogEntry } from "./replay-interpreter.ts";
 
 /*
@@ -44,7 +44,8 @@ import type { LogEntry } from "./replay-interpreter.ts";
 type Command =
   | { kind: "add"; args: string[] }
   | { kind: "report"; args: string[] }
-  | { kind: "budget"; args: string[] };
+  | { kind: "budget"; args: string[] }
+  | { kind: "replay"; args: string[] };
 
 function parseCommand(argv: string[]): Command {
   const [kind, ...args] = argv;
@@ -52,7 +53,7 @@ function parseCommand(argv: string[]): Command {
   /*
    * 보장 2가 아직 들어오지 않은 거친 스텁입니다.
    *
-   * 아래 단언은 "argv[0]이 add, report, budget 중 하나다"라고
+   * 아래 단언은 "argv[0]이 add, report, budget, replay 중 하나다"라고
    * 타입 검사기에게만 말합니다. 실제 문자열을 확인하지는 않습니다.
    * 그래서 nonsense 같은 값도 Command로 만들어져 main까지 넘어갑니다.
    * 다음 단계에서는 이 자리를 진짜 파싱으로 바꿉니다.
@@ -155,6 +156,28 @@ function runAddRecording(args: readonly string[], argv: readonly string[]): void
 }
 
 /*
+ * replay 명령은 run-log.json에 남은 argv를 다시 파싱해 같은 runAdd를 한 번 더 돕니다.
+ * 이번에는 리플레이 인터프리터를 넘기므로 저널과 시계는 기록에서 나오고, 쓰기와 출력은
+ * 실행하지 않고 [리플레이] 표시와 함께 무엇을 하려 했는지만 보여 줍니다. 그래서 몇 번을
+ * 재생해도 journal.json과 run-log.json은 바뀌지 않습니다.
+ *
+ * 지금 기록하는 실행은 add뿐이므로, 로그의 명령이 add가 아니면 재생하지 않고 멈춥니다.
+ */
+function runReplay(): void {
+  const log = loadRunLog(RUN_LOG_PATH);
+  const recorded = parseCommand([...log.argv]);
+
+  if (recorded.kind !== "add") {
+    console.log(`기록된 실행이 add가 아닙니다: ${recorded.kind}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const { rest } = takeFlags(recorded.args);
+  runAdd(rest, makeReplayInterpreter(log));
+}
+
+/*
  * parseCommand는 아직 플래그를 모르는 단순한 표면 파서입니다. 그래서 add 인자에
  * 섞여 들어온 --dry-run 같은 플래그는 add 실행 직전에 한 번 걸러 냅니다.
  * 지금은 알 수 없는 --플래그도 조용히 빼고, 실제 거래 인자만 rest에 남깁니다.
@@ -200,12 +223,15 @@ function main(command: Command, argv: readonly string[]): void {
       console.log("budget 명령은 아직 구현되지 않았습니다.");
       console.log(`인자: ${command.args.join(", ")}`);
       break;
+    case "replay":
+      runReplay();
+      break;
     default: {
       /*
-       * 위 세 case가 Command 유니온을 모두 소진하면, 이 위치의 command는
+       * 위 네 case가 Command 유니온을 모두 소진하면, 이 위치의 command는
        * never로 좁혀집니다. 그래서 지금은 아래 대입이 컴파일됩니다.
        *
-       * 나중에 Command에 네 번째 kind를 더하고 switch 분기를 빠뜨리면,
+       * 나중에 Command에 다섯 번째 kind를 더하고 switch 분기를 빠뜨리면,
        * command가 더 이상 never가 아니므로 이 줄이 곧바로 컴파일 오류가 됩니다.
        * 빠진 분기를 타입 검사 단계에서 확인하게 해 주는 완전성 검사입니다.
        */
@@ -428,6 +454,47 @@ export { JOURNAL_PATH, RUN_LOG_PATH, parseCommand, runAdd, takeFlags };
  *
  * $ shasum -a 256 journal.json
  * ecaee8e1653fe2821fa99b8f65c5755523c5e5214743db7a54ae5f7f07366b1d  journal.json
+ *
+ * $ npx tsc -p .
+ * 출력 없음
+ * 종료 코드: 0
+ *
+ * replay 명령을 더한 뒤 같은 흐름을 다시 확인했습니다. 거래 두 개가 든 journal.json에서
+ * 커피 거래를 --record로 기록하고, 그 로그를 replay로 재생했습니다.
+ *
+ * $ node src/cli.ts add 5000 커피 --record
+ * 기록 완료. 누적 차변 합계: 35000
+ * 종료 코드: 0
+ *
+ * $ shasum -a 256 journal.json run-log.json
+ * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
+ * d62b49c41996008ce52016b2c6751956a7322d2c8e7c48b8a74552ba5f835a68  run-log.json
+ *
+ * $ node src/cli.ts replay
+ * [리플레이] journal.json에 쓸 내용:
+ * ... 거래 세 개가 든 JSON 출력 생략 ...
+ *
+ * [리플레이] 출력할 내용: 기록 완료. 누적 차변 합계: 35000
+ * 종료 코드: 0
+ *
+ * $ shasum -a 256 journal.json run-log.json
+ * cabb5f4ca7f774ceb43efebca269d914a36c15f9a357284d37cef5d10edf4156  journal.json
+ * d62b49c41996008ce52016b2c6751956a7322d2c8e7c48b8a74552ba5f835a68  run-log.json
+ *
+ * 재생 전후 해시가 같으므로 replay는 두 파일을 바꾸지 않았습니다. 재생이 보여 준 쓸 내용은
+ * --record 실행이 실제로 적은 journal.json과 같습니다.
+ *
+ * $ node src/verify-replay.ts
+ * 리플레이 일치
+ * 비교한 커맨드 수: 2
+ * 종료 코드: 0
+ *
+ * run-log.json이 없으면 loadRunLog가 무엇을 먼저 해야 하는지 알려 주며 멈춥니다.
+ *
+ * $ node src/cli.ts replay
+ * ... 스택 추적 생략 ...
+ * Error: 실행 로그를 찾지 못했습니다. 먼저 node src/cli.ts add ... --record 명령으로 run-log.json 파일을 만드십시오.
+ * 종료 코드: 1
  *
  * $ npx tsc -p .
  * 출력 없음
