@@ -51,8 +51,8 @@ jspm_packages/
 projects/ledger/journal.json
 projects/ledger/run-log.json
 
-# 강의 실습 산출물 (§28 SVG 좌우 반전 — ep_186)
-episodes/s28-effect-tracking/out/
+# 강의 실습 산출물 (§28 SVG/PNG 프로그램 합성 — ep_186)
+episodes/s28-effect-tracking/compose/out/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
