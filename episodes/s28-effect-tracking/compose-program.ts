@@ -1,4 +1,4 @@
-// 작은 프로그램을 합성할 Program 도구와 이펙트 타입을 정의한다.
+// SVG 작업을 작은 프로그램으로 분해하고 각각의 이펙트를 확인한다.
 // 실행: printf '600\n400\nq\n' | node episodes/s28-effect-tracking/compose-program.ts
 // 검사: npx tsc --noEmit
 
@@ -110,5 +110,58 @@ type Eq<X, Y> =
   (<T>() => T extends Y ? 1 : 2) ? true : false;
 
 console.log("준비: Program 도구가 준비되었습니다.");
+
+// 단계 2 — 문제를 입력, 다운로드, 반전, 저장, 보고로 분해한다.
+
+// 어느 입력에서든 q이면 quit을 리턴한다. 그 외에는 너비와 높이를 모은다.
+const askSize: Program<Size | "quit", "input"> =
+  Program.ask("너비> ").pipe((w) => {
+    if (w === "q") return Program.of("quit" as const);
+    return Program.ask("높이> ").pipe((h): Program<Size | "quit", never> => {
+      if (h === "q") return Program.of("quit" as const);
+      return Program.of({ w, h });
+    });
+  });
+
+const askSizeEffects: Eq<
+  typeof askSize, Program<Size | "quit", "input">
+> = true;
+
+// HTTP 실패도 태그로 기록하므로, 다운로드에는 두 이펙트가 필요하다.
+function download({ w, h }: Size) {
+  return Program.fetch(`https://placehold.co/${w}x${h}`).pipe((r) => {
+    if (r.ok) return Program.of(r.text);
+    return Program.fail(`placehold.co ${r.status}: ${w}x${h}`);
+  });
+}
+
+const downloadEffects: Eq<
+  ReturnType<typeof download>, Program<string, "network" | "failure">
+> = true;
+
+// 루트 svg는 보존하고 내부만 감싼다. 문자열 계산에는 핸들러가 필요하지 않다.
+function flip(svg: string, { w }: Size): Program<string, never> {
+  const group = `<g transform="translate(${w} 0) scale(-1 1)">`;
+  return Program.of(svg.replace(
+    /(<svg\b[^>]*>)([\s\S]*)(<\/svg>)/,
+    (_, root, inner, end) => `${root}${group}${inner}</g>${end}`,
+  ));
+}
+
+const flipIsPure: Eq<ReturnType<typeof flip>, Program<string, never>> = true;
+
+// 저장 위치는 핸들러가 맡고, 이 프로그램은 파일 이름을 정한다.
+function save(svg: string, { w, h }: Size) {
+  return Program.writeFile(`placeholder-${w}x${h}-flipped.svg`, svg);
+}
+
+const saveEffects: Eq<ReturnType<typeof save>, Program<string, "fileIO">> = true;
+
+// 저장 결과를 알리는 프로그램은 logging만 필요하다.
+const report = (name: string) => Program.log(`저장: out/${name}`);
+
+const reportEffects: Eq<ReturnType<typeof report>, Program<void, "logging">> = true;
+
+console.log("분해: 작은 프로그램 다섯 개의 이펙트를 확인했습니다.");
 
 export {};
