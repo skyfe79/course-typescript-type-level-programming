@@ -1,4 +1,4 @@
-// SVG 작업을 작은 프로그램으로 분해하고 각각의 이펙트를 확인한다.
+// 작은 프로그램을 합성하여 SVG 작업을 반복하는 앱을 구성한다.
 // 실행: printf '600\n400\nq\n' | node episodes/s28-effect-tracking/compose-program.ts
 // 검사: npx tsc --noEmit
 
@@ -163,5 +163,37 @@ const report = (name: string) => Program.log(`저장: out/${name}`);
 const reportEffects: Eq<ReturnType<typeof report>, Program<void, "logging">> = true;
 
 console.log("분해: 작은 프로그램 다섯 개의 이펙트를 확인했습니다.");
+
+// 단계 3 — 작은 프로그램을 한 작업으로 합성하고, 그 작업을 반복한다.
+
+// 크기를 이미 받은 작업이므로 input은 없다. 앞 결과가 다음 프로그램의 입력이 된다.
+const flipOnce = (s: Size) =>
+  download(s)
+    .pipe((svg) => flip(svg, s))
+    .pipe((svg) => save(svg, s))
+    .pipe(report);
+
+const flipOnceEffects: Eq<
+  ReturnType<typeof flipOnce>,
+  Program<void, "network" | "failure" | "fileIO" | "logging">
+> = true;
+
+// 입력 프로그램과 이미지 작업을 합성한다. 반복 신호는 quit 또는 again이다.
+const iteration = askSize.pipe((s) => {
+  if (s === "quit") return Program.of("quit" as const);
+  return flipOnce(s).pipe(() => Program.of("again" as const));
+});
+
+// quit까지 반복한다. HTTP 실패는 센티널로 현재 작업을 건너뛰고 입력을 계속 받는다.
+const app = iteration.repeatUntil((r) => r === "quit");
+
+const appEffects: Eq<typeof app, Program<void, EffectTag>> = true;
+const loopKeepsEffects: Eq<
+  typeof app["effects"], typeof iteration["effects"]
+> = true;
+
+console.log(
+  "합성: app에 input, network, fileIO, logging, failure가 모두 기록되어 있습니다.",
+);
 
 export {};
