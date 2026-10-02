@@ -1,6 +1,14 @@
-// 작은 프로그램을 합성하여 SVG 작업을 반복하는 앱을 구성한다.
+// 입력한 크기의 SVG를 내려받아 로컬에서 좌우 반전하고 저장한다. q를 입력하면 종료한다.
 // 실행: printf '600\n400\nq\n' | node episodes/s28-effect-tracking/compose-program.ts
 // 검사: npx tsc --noEmit
+
+import {
+  mkdir,
+  writeFile,
+} from "node:fs/promises";
+import {
+  createInterface,
+} from "node:readline/promises";
 
 // 단계 1 — 작은 프로그램을 합성할 도구를 준비한다.
 
@@ -195,5 +203,52 @@ const loopKeepsEffects: Eq<
 console.log(
   "합성: app에 input, network, fileIO, logging, failure가 모두 기록되어 있습니다.",
 );
+
+// 단계 4 — 다섯 핸들러를 연결하여 합성한 앱을 실행한다.
+
+// 첫 입력 때 단일 iterator를 만든다. 파이프 입력도 줄을 잃지 않고 순서대로 읽는다.
+let rl: ReturnType<typeof createInterface> | undefined;
+let lines: AsyncIterator<string> | undefined;
+
+// 작업 디렉터리가 달라도 이 파일 옆의 out에 저장한다.
+const dir = new URL("./out/", import.meta.url);
+
+// 프로그램은 작업 순서를 정하고, 핸들러는 실제 입력과 외부 작업을 수행한다.
+const complete = app
+  .handle("input", async (prompt) => {
+    if (!lines) {
+      rl = createInterface({ input: process.stdin });
+      lines = rl[Symbol.asyncIterator]();
+    }
+    process.stdout.write(prompt);
+    const line = await lines.next();
+    const value = line.done ? "q" : line.value;
+    if (!process.stdin.isTTY) console.log(value);
+    return value;
+  })
+  .handle("network", async (url) => {
+    const r = await fetch(url);
+    return { ok: r.ok, status: r.status, text: await r.text() };
+  })
+  .handle("fileIO", async (name, svg) => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(new URL(name, dir), svg);
+  })
+  .handle("logging", async (message) => {
+    console.log(message);
+  })
+  .handle("failure", async (reason) => {
+    console.log(`실패: ${reason}`);
+  });
+
+// 모든 태그가 제거되어 실행 가능한 Program<void, never>가 된다.
+const completeEffects: Eq<typeof complete, Program<void, never>> = true;
+
+// 반복이 끝나거나 예외가 나면 입력 인터페이스를 닫는다.
+try {
+  await complete.run();
+} finally {
+  rl?.close();
+}
 
 export {};
