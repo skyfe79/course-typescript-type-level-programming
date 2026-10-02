@@ -53,3 +53,29 @@ function tryUnhandled(): void {
 
 console.log("합성: app에 HttpError, NetworkError, WriteError가 남아 있어 run()을 호출할 수 없습니다.");
 
+// 한 회차의 HttpError만 처리하므로, 실패한 회차 뒤에도 입력을 계속 받는다.
+const tolerantPerImage = catchError(perImage, isHttpError, async (e) => {
+  console.log(`실패: ${e.message}`);
+});
+const loop = repeat(askSize, isQuit, tolerantPerImage);
+
+const tolerantErrors: Eq<
+  typeof tolerantPerImage, Program<Size, void, NetworkError | WriteError, never>
+> = true;
+const loopErrors: Eq<
+  typeof loop, Program<void, void, NetworkError | WriteError, never>
+> = true;
+
+// 두 치명적 오류는 루프 밖으로 전파되어 앱 전체를 한 번 중단한다.
+const safeApp = catchError(loop, isFatal, async (e) => {
+  console.log(`중단: ${e.message}`);
+});
+
+const safeEffects: Eq<typeof safeApp, Program<void, void, never, never>> = true;
+
+// 종료하거나 선언하지 않은 예외가 나도 입력 인터페이스를 닫는다.
+try {
+  await safeApp.run();
+} finally {
+  closeInput();
+}
