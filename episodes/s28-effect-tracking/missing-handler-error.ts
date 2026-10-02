@@ -1,10 +1,11 @@
-// 앞선 이펙트 태그와 chain을 Program에 모아, 비동기 작업을 합성하는 예제다.
+// 앞선 이펙트 추적과 합성을 Program에 모아, 실제 핸들러가 모두 붙어야 실행하게 한다.
 // 실행: node episodes/s28-effect-tracking/missing-handler-error.ts
 // 검사: npx tsc --noEmit
 
 import {
   appendFile,
   readFile,
+  writeFile,
 } from "node:fs/promises";
 
 // codeStep 409 — 여러 이펙트를 가진 프로그램 만들기
@@ -70,6 +71,14 @@ class Program<A, E extends EffectTag> {
       Exclude<E, K>
     >;
   }
+
+  // codeStep 411 — run() 호출로 컴파일 에러 읽기
+
+  // 명시적 this 매개변수는 E가 never인 프로그램만 호출 대상으로 허용한다.
+  // 모든 태그에 핸들러를 붙인 뒤이므로, 실행 경계에서 완성된 Handlers로 단언한다.
+  run(this: Program<A, never>): Promise<A> {
+    return this.body(this.handlers as Handlers);
+  }
 }
 
 // 두 타입이 정확히 같은지 판별한다. true를 상수에 대입하면 타입 주장이 계속 검사된다.
@@ -102,5 +111,45 @@ const handledKeepsOnlyNetwork: Eq<
   typeof handled,
   Program<void, "network">
 > = true;
+
+// network 하나가 남은 상태에서 run()을 부르면 무슨 일이 일어나는지 확인한다.
+function tryRunWithNetworkUnhandled(): void {
+  // Node의 타입 스트리핑은 타입 오류를 실행 중에 막지 않으므로, 이 함수는 정의만 하고 호출하지 않는다.
+  // @ts-expect-error - network 이펙트가 아직 처리되지 않아 E가 never로 좁혀지지 않았다
+  handled.run();
+  // 실측 진단(@ts-expect-error 한 줄의 내용을 지우고 줄바꿈은 유지했을 때):
+  // episodes/s28-effect-tracking/missing-handler-error.ts(119,3): error TS2684: The 'this' context of type 'Program<void, "network">' is not assignable to method's 'this' of type 'Program<void, never>'.
+  //   Type '"network"' is not assignable to type 'never'.
+}
+
+// 핸들러를 하나도 붙이지 않으면 에러 메시지에 남은 세 태그가 함께 나타난다.
+function tryRunWithNothingHandled(): void {
+  // @ts-expect-error - 세 이펙트를 하나도 처리하지 않아 E가 never로 좁혀지지 않았다
+  pipeline.run();
+  // 실측 진단(@ts-expect-error 한 줄의 내용을 지우고 줄바꿈은 유지했을 때):
+  // episodes/s28-effect-tracking/missing-handler-error.ts(128,3): error TS2684: The 'this' context of type 'Program<void, "fileIO" | "logging" | "network">' is not assignable to method's 'this' of type 'Program<void, never>'.
+  //   Type '"fileIO" | "logging" | "network"' is not assignable to type 'never'.
+  //     Type '"fileIO"' is not assignable to type 'never'.
+}
+
+// 두 @ts-expect-error는 오류가 실제로 나야만 통과한다. 거부 규칙이 그대로 지켜지는지가 계속 검사된다.
+console.log("컴파일 에러 확인: 남은 이펙트가 있으면 run()을 호출할 수 없습니다.");
+
+// 마지막 핸들러는 fetch로 실제 HTTP 요청을 수행하고, 응답 JSON을 리턴한다.
+const complete = handled.handle("network", async (url) => {
+  const response = await fetch(url);
+  return response.json();
+});
+
+const completeHasNoRemainingEffects: Eq<
+  typeof complete,
+  Program<void, never>
+> = true;
+
+// 로그 파일을 비운 뒤, 세 핸들러를 사용하는 본문을 실행하고 실제 기록을 확인한다.
+await writeFile(logPath, "");
+await complete.run();
+console.log("report.log 내용:");
+console.log((await readFile(logPath, "utf8")).trimEnd());
 
 export {};
