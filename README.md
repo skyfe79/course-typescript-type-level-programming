@@ -1,5 +1,8 @@
 # Real! TypeScript 7 — 실습 저장소
 
+<img width="800" height="1084" alt="image" src="https://github.com/user-attachments/assets/70c966da-6fdf-48fe-ba3b-760cac78a66a" />
+
+
 타입 설계(Part 1)와 타입 레벨 프로그래밍(Part 2) 강좌의 실습 코드가 들어 있습니다.
 
 ## 강의를 따라오는 법
